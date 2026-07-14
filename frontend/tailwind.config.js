@@ -60,11 +60,16 @@ export default {
           from: { opacity: 0, transform: "translateY(4px) scale(0.98)" },
           to: { opacity: 1, transform: "translateY(0) scale(1)" },
         },
+        "dialog-lift-in": {
+          from: { opacity: 0, transform: "translate(-50%, calc(-50% + 4px)) scale(0.98)" },
+          to: { opacity: 1, transform: "translate(-50%, -50%) scale(1)" },
+        },
       },
       animation: {
         "fade-in": "fade-in 180ms ease-out",
         "fade-in-up": "fade-in-up 200ms ease-out",
         "lift-in": "lift-in 180ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "dialog-lift-in": "dialog-lift-in 180ms cubic-bezier(0.16, 1, 0.3, 1)",
       },
     },
   },

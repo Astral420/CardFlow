@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, ImageOff, Maximize2, ExternalLink, Download, AlertTriangle,
-  Loader2, Images, Copy, CheckCircle2, ArrowRight,
+  Loader2, Images, Copy, CheckCircle2, ArrowRight, ZoomIn, ZoomOut, X,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -51,9 +52,8 @@ function ScanThumbnail({ scan, onClick }: { scan: RawScan; onClick: () => void }
       initial={{ opacity: 0, scale: 0.97 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.18 }}
-      className={`group relative cursor-pointer overflow-hidden rounded-2xl border bg-muted shadow-soft transition-all duration-200 hover:shadow-float hover:-translate-y-0.5 ${
-        scan.is_duplicate ? 'border-red-400/40 opacity-50' : 'border-border'
-      }`}
+      className={`group relative cursor-pointer overflow-hidden rounded-2xl border bg-muted shadow-soft transition-all duration-200 hover:shadow-float hover:-translate-y-0.5 ${scan.is_duplicate ? 'border-red-400/40 opacity-50' : 'border-border'
+        }`}
       onClick={onClick}
       role="button"
       tabIndex={0}
@@ -91,9 +91,93 @@ function ScanThumbnail({ scan, onClick }: { scan: RawScan; onClick: () => void }
   )
 }
 
+function FullscreenLightbox({
+  isOpen,
+  onClose,
+  src,
+  alt,
+  rotationDegrees,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  src: string
+  alt: string
+  rotationDegrees: number
+}) {
+  const [scale, setScale] = useState(1)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  // Reset scale when opened
+  useEffect(() => {
+    if (isOpen) setScale(1)
+  }, [isOpen])
+
+  if (typeof document === 'undefined') return null
+
+  return createPortal(
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[100] flex flex-col bg-black/95 backdrop-blur-sm pointer-events-auto"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="absolute right-4 top-4 z-10">
+            <button 
+              onClick={onClose} 
+              className="rounded-full p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              <X className="h-6 w-6" />
+            </button>
+          </div>
+          <div ref={containerRef} className="relative flex flex-1 items-center justify-center overflow-hidden">
+            <motion.img
+              src={src}
+              alt={alt}
+              drag
+              dragConstraints={containerRef}
+              dragElastic={0.2}
+              className="max-h-[85vh] max-w-[90vw] cursor-grab object-contain active:cursor-grabbing"
+              animate={{ scale, rotate: rotationDegrees || 0 }}
+              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            />
+            <div className="absolute bottom-8 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-xl bg-white/10 p-2 backdrop-blur-md">
+              <button 
+                onClick={() => setScale(s => Math.max(0.5, s - 0.5))}
+                className="rounded-lg p-2 text-white transition-colors hover:bg-white/20 disabled:opacity-50"
+                disabled={scale <= 0.5}
+              >
+                <ZoomOut className="h-5 w-5" />
+              </button>
+              <span className="w-12 text-center text-xs font-semibold text-white">
+                {Math.round(scale * 100)}%
+              </span>
+              <button 
+                onClick={() => setScale(s => Math.min(4, s + 0.5))}
+                className="rounded-lg p-2 text-white transition-colors hover:bg-white/20 disabled:opacity-50"
+                disabled={scale >= 4}
+              >
+                <ZoomIn className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>,
+    document.body
+  )
+}
+
 function InspectorDrawer({ scan, onClose }: { scan: RawScan; onClose: () => void }) {
+  const [isLightboxOpen, setIsLightboxOpen] = useState(false)
+
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
+    <Dialog open onOpenChange={(open) => {
+      if (!open && !isLightboxOpen) onClose()
+    }}>
       <DialogContent
         title={scan.original_filename}
         description={`Scan #${scan.id} \u2014 ${scan.side} face`}
@@ -101,12 +185,22 @@ function InspectorDrawer({ scan, onClose }: { scan: RawScan; onClose: () => void
       >
         <div className="flex gap-6">
           {scan.thumbnail_url ? (
-            <RotatedImage
-              src={scan.thumbnail_url}
-              alt={scan.original_filename}
-              rotationDegrees={scan.rotation_degrees}
-              className="h-64 w-44 shrink-0 rounded-xl border border-border"
-            />
+            <div 
+              className="group relative h-64 w-44 shrink-0 cursor-pointer overflow-hidden rounded-xl border border-border"
+              onClick={() => setIsLightboxOpen(true)}
+            >
+              <RotatedImage
+                src={scan.thumbnail_url}
+                alt={scan.original_filename}
+                rotationDegrees={scan.rotation_degrees}
+                className="h-full w-full"
+              />
+              <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all group-hover:bg-black/20 group-hover:opacity-100">
+                <div className="rounded-full bg-white/90 p-2 text-primary shadow-sm">
+                  <Maximize2 className="h-5 w-5" />
+                </div>
+              </div>
+            </div>
           ) : (
             <div className="flex h-64 w-44 shrink-0 items-center justify-center rounded-xl border border-border bg-muted">
               <ImageOff className="h-10 w-10 text-muted-foreground/40" />
@@ -155,6 +249,16 @@ function InspectorDrawer({ scan, onClose }: { scan: RawScan; onClose: () => void
           </div>
         </div>
       </DialogContent>
+      
+      {scan.thumbnail_url && (
+        <FullscreenLightbox
+          isOpen={isLightboxOpen}
+          onClose={() => setIsLightboxOpen(false)}
+          src={scan.thumbnail_url}
+          alt={scan.original_filename}
+          rotationDegrees={scan.rotation_degrees}
+        />
+      )}
     </Dialog>
   )
 }
@@ -165,9 +269,9 @@ function ScoreBar({ label, value }: { label: string; value: number | null }) {
   const pct = value != null ? Math.round(value * 100) : null
   const color =
     pct == null ? 'bg-muted-foreground/40'
-    : pct >= 90 ? 'bg-accent-rose-solid'
-    : pct >= 70 ? 'bg-accent-peach-solid'
-    : 'bg-accent-mint-solid'
+      : pct >= 90 ? 'bg-accent-rose-solid'
+        : pct >= 70 ? 'bg-accent-peach-solid'
+          : 'bg-accent-mint-solid'
   return (
     <div className="space-y-1">
       <div className="flex justify-between">
@@ -194,15 +298,15 @@ function DuplicatePairCard({ pair }: { pair: BatchDuplicatePair }) {
 
   const confidenceVariant: 'neutral' | 'rose' | 'peach' | 'mint' =
     avgScore == null ? 'neutral'
-    : avgScore >= 0.9 ? 'rose'
-    : avgScore >= 0.7 ? 'peach'
-    : 'mint'
+      : avgScore >= 0.9 ? 'rose'
+        : avgScore >= 0.7 ? 'peach'
+          : 'mint'
 
   const confidenceLabel =
     avgScore == null ? 'Unknown'
-    : avgScore >= 0.9 ? 'High confidence'
-    : avgScore >= 0.7 ? 'Medium'
-    : 'Low confidence'
+      : avgScore >= 0.9 ? 'High confidence'
+        : avgScore >= 0.7 ? 'Medium'
+          : 'Low confidence'
 
   return (
     <motion.div
@@ -376,11 +480,11 @@ export function BatchDetailPage() {
 
   const progressValue =
     !batch ? 0 :
-    batch.status === 'complete' ? 100 :
-    batch.status === 'duplicate_review' ? 80 :
-    batch.status === 'rotation_review' ? 60 :
-    batch.status === 'cropping' ? 40 :
-    batch.status === 'extracting' ? 20 : 0
+      batch.status === 'complete' ? 100 :
+        batch.status === 'duplicate_review' ? 80 :
+          batch.status === 'rotation_review' ? 60 :
+            batch.status === 'cropping' ? 40 :
+              batch.status === 'extracting' ? 20 : 0
 
   const showForceAdvance =
     batch?.status === 'cropping' &&
@@ -495,9 +599,8 @@ export function BatchDetailPage() {
             ].map(({ label, value, highlight }) => (
               <div
                 key={label}
-                className={`rounded-xl px-3 py-2 text-center transition-colors ${
-                  highlight ? 'bg-amber-500/10 ring-1 ring-amber-500/30' : 'bg-muted'
-                }`}
+                className={`rounded-xl px-3 py-2 text-center transition-colors ${highlight ? 'bg-amber-500/10 ring-1 ring-amber-500/30' : 'bg-muted'
+                  }`}
               >
                 <p className={`text-section font-bold ${highlight ? 'text-amber-600' : 'text-primary'}`}>{value}</p>
                 <p className="text-caption text-muted-foreground">{label}</p>
@@ -522,11 +625,10 @@ export function BatchDetailPage() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`relative flex items-center gap-2 px-4 py-2.5 text-body font-medium transition-colors ${
-                activeTab === tab.id
+              className={`relative flex items-center gap-2 px-4 py-2.5 text-body font-medium transition-colors ${activeTab === tab.id
                   ? 'text-primary'
                   : 'text-muted-foreground hover:text-primary'
-              }`}
+                }`}
             >
               {tab.id === 'scans' ? (
                 <Images className="h-3.5 w-3.5" />
@@ -536,11 +638,10 @@ export function BatchDetailPage() {
               {tab.label}
               {tab.count != null && tab.count > 0 && (
                 <span
-                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
-                    tab.id === 'duplicates'
+                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${tab.id === 'duplicates'
                       ? 'bg-accent-rose text-accent-rose-foreground'
                       : 'bg-muted text-muted-foreground'
-                  }`}
+                    }`}
                 >
                   {tab.count}
                 </span>
