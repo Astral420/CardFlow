@@ -1,0 +1,75 @@
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.models import (
+    Batch,
+    BatchStatus,
+    CardCrop,
+    DuplicateCandidate,
+    DuplicateStatus,
+    RawScan,
+    ScanStatus,
+)
+
+
+def refresh_batch_status(db: Session, batch_id: int) -> BatchStatus | None:
+    """Derive and persist the current batch pipeline status.
+
+    Batch status is operational state, not a separately-owned workflow flag. It
+    should reflect the child rows so batches do not get stuck when async tasks
+    finish in a different process.
+    """
+    batch = db.get(Batch, batch_id)
+    if batch is None:
+        return None
+
+    scans_count = (
+        db.query(func.count(RawScan.id)).filter(RawScan.batch_id == batch_id).scalar()
+        or 0
+    )
+    if scans_count == 0:
+        batch.status = BatchStatus.extracting
+        return batch.status
+
+    pending_scans = (
+        db.query(func.count(RawScan.id))
+        .filter(RawScan.batch_id == batch_id, RawScan.status == ScanStatus.pending)
+        .scalar()
+        or 0
+    )
+    if pending_scans:
+        batch.status = BatchStatus.cropping
+        return batch.status
+
+    pending_rotation = (
+        db.query(func.count(CardCrop.id))
+        .join(RawScan)
+        .filter(
+            RawScan.batch_id == batch_id,
+            RawScan.status == ScanStatus.cropped,
+            CardCrop.rotation_confirmed_at.is_(None),
+        )
+        .scalar()
+        or 0
+    )
+    if pending_rotation:
+        batch.status = BatchStatus.rotation_review
+        return batch.status
+
+    pending_duplicate_review = (
+        db.query(func.count(DuplicateCandidate.id))
+        .join(CardCrop, DuplicateCandidate.card_crop_id_a == CardCrop.id)
+        .join(RawScan, CardCrop.raw_scan_id == RawScan.id)
+        .filter(
+            RawScan.batch_id == batch_id,
+            DuplicateCandidate.status == DuplicateStatus.pending,
+        )
+        .scalar()
+        or 0
+    )
+    if pending_duplicate_review:
+        batch.status = BatchStatus.duplicate_review
+        return batch.status
+
+    batch.status = BatchStatus.complete
+    return batch.status

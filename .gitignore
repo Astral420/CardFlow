@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.egg-info/
+
+node_modules/
+dist/
+.vercel/
+
+.DS_Store
+.agents/
+
+frontend-prompt.md
+card-tool-v1-spec.md
+PLAN.md
