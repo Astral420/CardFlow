@@ -13,7 +13,10 @@ import { Button } from '@/components/ui/button'
 import { ShortcutHint } from '@/components/ui/kbd'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
+import { Card } from '@/components/ui/card'
 import { useToast } from '@/components/ui/toast'
+import { PageHeader } from '@/components/shared/page-header'
+import { SectionLabel } from '@/components/shared/section-label'
 import type { CropQueueItem, RotationNext } from '@/lib/types'
 
 function CardImagePanel({
@@ -41,7 +44,7 @@ function CardImagePanel({
         )}
       </div>
 
-      <div className="relative flex min-h-[320px] w-full max-w-[460px] items-center justify-center overflow-hidden rounded-2xl border border-border bg-muted p-3 shadow-soft">
+      <div className="relative flex min-h-[320px] w-full max-w-[460px] items-center justify-center overflow-hidden rounded-xl border border-border bg-muted p-3 shadow-soft">
         {crop?.image_url ? (
           <motion.img
             src={crop.image_url}
@@ -181,31 +184,29 @@ export function RotationReviewPage() {
   const isEmpty = !isLoading && !current
 
   return (
-    <div className="flex h-[calc(100vh-48px)] flex-col py-2">
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-page-title text-primary">Rotation Review</h1>
-          <p className="mt-0.5 text-body text-muted-foreground">
-            Rotate front and back independently, then confirm each pending side.
-          </p>
-        </div>
-        {queueCount && queueCount.count > 0 && (
-          <Badge variant="lavender" className="text-body px-3 py-1.5">
-            {queueCount.count} remaining
-          </Badge>
-        )}
-      </div>
+    <div className="flex h-[calc(100vh-48px)] flex-col">
+      <PageHeader
+        title="Rotation Review"
+        description="Rotate front and back independently, then confirm each pending side."
+        actions={
+          queueCount && queueCount.count > 0 ? (
+            <Badge variant="lavender" className="text-body px-3 py-1.5">
+              {queueCount.count} remaining
+            </Badge>
+          ) : undefined
+        }
+      />
 
       {isLoading ? (
         <div className="flex flex-1 gap-8">
-          <Skeleton className="flex-1 rounded-2xl" />
-          <Skeleton className="flex-1 rounded-2xl" />
-          <Skeleton className="w-56 rounded-2xl" />
+          <Skeleton className="flex-1 rounded-xl" />
+          <Skeleton className="flex-1 rounded-xl" />
+          <Skeleton className="w-56 rounded-xl" />
         </div>
       ) : isEmpty ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="flex flex-col items-center gap-4 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-accent-mint text-accent-mint-foreground">
+            <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-accent-mint text-accent-mint-foreground">
               <CheckCircle className="h-8 w-8" />
             </div>
             <div>
@@ -246,44 +247,42 @@ export function RotationReviewPage() {
           </AnimatePresence>
 
           <div className="flex w-56 shrink-0 flex-col gap-4">
-            <div className="rounded-2xl border border-border bg-surface p-4 shadow-soft space-y-3">
+            <Card className="space-y-3 p-4">
               <div>
-                <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Filename</p>
+                <SectionLabel>Filename</SectionLabel>
                 <p className="mt-1 break-all text-body font-medium text-primary">
                   {current?.original_filename ?? '-'}
                 </p>
               </div>
               <div>
-                <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Batch</p>
+                <SectionLabel>Batch</SectionLabel>
                 <p className="mt-1 text-body text-primary">#{current?.batch_id ?? '-'}</p>
               </div>
               <div>
-                <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Queue</p>
+                <SectionLabel>Queue</SectionLabel>
                 <p className="mt-1 text-body text-primary">{queueCount?.count ?? '-'} remaining</p>
               </div>
               {current?.front?.crop_id && (
                 <div>
-                  <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Front Crop ID</p>
+                  <SectionLabel>Front Crop ID</SectionLabel>
                   <p className="mt-1 text-body text-primary">#{current.front.crop_id}</p>
                 </div>
               )}
               {current?.back?.crop_id && (
                 <div>
-                  <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Back Crop ID</p>
+                  <SectionLabel>Back Crop ID</SectionLabel>
                   <p className="mt-1 text-body text-primary">#{current.back.crop_id}</p>
                 </div>
               )}
-            </div>
+            </Card>
 
-            <div className="rounded-2xl border border-border bg-surface p-4 shadow-soft space-y-2">
-              <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                Shortcuts
-              </p>
+            <Card className="space-y-2 p-4">
+              <SectionLabel className="mb-2">Shortcuts</SectionLabel>
               <ShortcutHint keys={['Space']} label="Confirm next pending" />
               <ShortcutHint keys={['F']} label="Front 90 deg" />
               <ShortcutHint keys={['B']} label="Back 90 deg" />
               <ShortcutHint keys={['Right']} label="Skip" />
-            </div>
+            </Card>
           </div>
         </div>
       )}

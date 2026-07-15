@@ -33,9 +33,9 @@ export function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm animate-lift-in rounded-3xl border border-border bg-surface p-8 shadow-float-lg">
+      <div className="w-full max-w-sm animate-lift-in rounded-2xl border border-border bg-surface p-8 shadow-float-lg">
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <Layers className="h-5 w-5" />
           </div>
           <div>

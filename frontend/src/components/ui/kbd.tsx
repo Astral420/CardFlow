@@ -4,7 +4,7 @@ export function Kbd({ children, className }: { children: React.ReactNode; classN
   return (
     <kbd
       className={cn(
-        "inline-flex h-6 min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-1.5 text-caption font-semibold text-primary shadow-[inset_0_-1px_0_rgba(17,24,39,0.06)]",
+        "inline-flex h-5 min-w-[20px] items-center justify-center rounded-md border border-border bg-muted px-1.5 text-caption font-semibold text-primary shadow-[inset_0_-1px_0_rgba(22,22,22,0.06)]",
         className
       )}
     >
@@ -29,7 +29,7 @@ export function ShortcutHint({
           <Kbd key={k}>{k}</Kbd>
         ))}
       </div>
-      <span className="text-caption text-muted-foreground">{label}</span>
+      {label && <span className="text-caption text-muted-foreground">{label}</span>}
     </div>
   );
 }

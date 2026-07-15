@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import type { BatchStatus, DuplicateStatus, ScanStatus } from "@/lib/types";
 
-const BATCH_STATUS_META: Record<
+export const BATCH_STATUS_META: Record<
   BatchStatus,
   { label: string; variant: "lavender" | "blue" | "peach" | "mint" | "neutral" }
 > = {

@@ -5,8 +5,8 @@ export function AppShell() {
   return (
     <div className="min-h-screen bg-background">
       <Sidebar />
-      <main className="ml-[332px] min-h-screen pr-8 py-6">
-        <div className="mx-auto w-full max-w-[1600px]">
+      <main className="min-h-screen pl-[232px]">
+        <div className="mx-auto w-full max-w-[1600px] px-8 py-6">
           <Outlet />
         </div>
       </main>

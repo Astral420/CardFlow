@@ -3,23 +3,19 @@ import { useAuth } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Avatar } from '@/components/ui/avatar'
 import { Card, CardContent } from '@/components/ui/card'
+import { PageHeader } from '@/components/shared/page-header'
 
 export function SettingsPage() {
   const { user, logout } = useAuth()
 
   return (
-    <div className="space-y-6 py-2">
-      <div>
-        <h1 className="text-page-title text-primary">Settings</h1>
-        <p className="mt-1 text-body text-muted-foreground">
-          Account and system configuration.
-        </p>
-      </div>
+    <div className="space-y-5">
+      <PageHeader title="Settings" description="Account and system configuration." />
 
       {/* Account section */}
-      <div className="grid gap-4 max-w-xl">
+      <div className="grid max-w-xl gap-3">
         <Card>
-          <CardContent className="p-5">
+          <CardContent className="p-4">
             <div className="flex items-center gap-4">
               <Avatar name={user?.name ?? '?'} className="h-12 w-12 text-section" />
               <div className="flex-1">
@@ -44,8 +40,8 @@ export function SettingsPage() {
 
         {/* System info */}
         <Card>
-          <CardContent className="p-5 space-y-3">
-            <div className="flex items-center gap-2 mb-4">
+          <CardContent className="space-y-3 p-4">
+            <div className="mb-3 flex items-center gap-2">
               <Settings className="h-4 w-4 text-muted-foreground" />
               <p className="text-card-title text-primary">System</p>
             </div>
@@ -65,12 +61,12 @@ export function SettingsPage() {
 
         {/* Pipeline info */}
         <Card>
-          <CardContent className="p-5 space-y-3">
-            <div className="flex items-center gap-2 mb-4">
+          <CardContent className="space-y-3 p-4">
+            <div className="mb-3 flex items-center gap-2">
               <User className="h-4 w-4 text-muted-foreground" />
               <p className="text-card-title text-primary">Processing Pipeline</p>
             </div>
-            <p className="text-body text-muted-foreground leading-relaxed">
+            <p className="text-body leading-relaxed text-muted-foreground">
               The Card Tool processes sports card scans through a 5-stage pipeline:
               batch upload → auto-crop → rotation review → duplicate detection → card log.
             </p>

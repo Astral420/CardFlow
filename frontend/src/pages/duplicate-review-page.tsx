@@ -10,9 +10,12 @@ import {
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Card } from '@/components/ui/card'
 import { ShortcutHint } from '@/components/ui/kbd'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/toast'
+import { PageHeader } from '@/components/shared/page-header'
+import { SectionLabel } from '@/components/shared/section-label'
 import type { CardPair, CropQueueItem } from '@/lib/types'
 
 function SimilarityBar({ label, value }: { label: string; value: number | null }) {
@@ -54,7 +57,7 @@ function SidePreview({
 
   return (
     <div
-      className={`overflow-hidden rounded-2xl border bg-muted shadow-soft ${
+      className={`overflow-hidden rounded-xl border bg-muted shadow-soft ${
         isMatched ? 'border-primary ring-2 ring-primary/10' : 'border-border'
       }`}
     >
@@ -202,32 +205,29 @@ export function DuplicateReviewPage() {
     { label: 'Low confidence', variant: 'mint' as const }
 
   return (
-    <div className="flex h-[calc(100vh-48px)] flex-col py-2">
-      {/* Header */}
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-page-title text-primary">Duplicate Review</h1>
-          <p className="mt-0.5 text-body text-muted-foreground">
-            Compare flagged card pairs and decide if they are duplicates.
-          </p>
-        </div>
-        {queueCount && queueCount.count > 0 && (
-          <Badge variant="peach" className="text-body px-3 py-1.5">
-            {queueCount.count} remaining
-          </Badge>
-        )}
-      </div>
+    <div className="flex h-[calc(100vh-48px)] flex-col">
+      <PageHeader
+        title="Duplicate Review"
+        description="Compare flagged card pairs and decide if they are duplicates."
+        actions={
+          queueCount && queueCount.count > 0 ? (
+            <Badge variant="peach" className="text-body px-3 py-1.5">
+              {queueCount.count} remaining
+            </Badge>
+          ) : undefined
+        }
+      />
 
       {isLoading ? (
         <div className="flex flex-1 gap-8">
-          <Skeleton className="flex-1 rounded-2xl" />
-          <Skeleton className="w-64 rounded-2xl" />
-          <Skeleton className="flex-1 rounded-2xl" />
+          <Skeleton className="flex-1 rounded-xl" />
+          <Skeleton className="w-64 rounded-xl" />
+          <Skeleton className="flex-1 rounded-xl" />
         </div>
       ) : isEmpty ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="flex flex-col items-center gap-4 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-accent-mint text-accent-mint-foreground">
+            <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-accent-mint text-accent-mint-foreground">
               <CheckCircle2 className="h-8 w-8" />
             </div>
             <div>
@@ -262,7 +262,7 @@ export function DuplicateReviewPage() {
 
               {/* Score panel */}
               <div className="w-60 shrink-0 space-y-4">
-                <div className="rounded-2xl border border-border bg-surface p-4 shadow-soft space-y-4">
+                <Card className="space-y-4 p-4">
                   <div className="text-center">
                     <Badge variant={confidenceBadge.variant} className="text-caption px-3 py-1">
                       {confidenceBadge.label}
@@ -271,7 +271,7 @@ export function DuplicateReviewPage() {
                   <SimilarityBar label="Structural" value={structScore} />
                   <SimilarityBar label="Color" value={colorScore} />
                   {current?.filename_match && (
-                    <div className="flex items-center gap-2 rounded-xl bg-accent-blue p-2.5">
+                    <div className="flex items-center gap-2 rounded-lg bg-accent-blue p-2.5">
                       <AlertTriangle className="h-3.5 w-3.5 text-accent-blue-foreground" />
                       <div>
                         <p className="text-caption font-medium text-accent-blue-foreground">
@@ -283,17 +283,15 @@ export function DuplicateReviewPage() {
                       </div>
                     </div>
                   )}
-                </div>
+                </Card>
 
                 {/* Shortcuts */}
-                <div className="rounded-2xl border border-border bg-surface p-4 shadow-soft space-y-2">
-                  <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                    Shortcuts
-                  </p>
+                <Card className="space-y-2 p-4">
+                  <SectionLabel className="mb-2">Shortcuts</SectionLabel>
                   <ShortcutHint keys={['D']} label="Confirm duplicate" />
                   <ShortcutHint keys={['R']} label="Not a duplicate" />
                   <ShortcutHint keys={['Space']} label="Skip" />
-                </div>
+                </Card>
               </div>
 
               {/* Card B */}

@@ -14,10 +14,10 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
       aria-label={label}
       title={label}
       className={cn(
-        "inline-flex h-9 w-9 items-center justify-center rounded-full transition-all duration-150 ease-out active:scale-95",
+        "inline-flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-150 ease-out active:scale-95",
         variant === "ghost" && "text-muted-foreground hover:bg-muted hover:text-primary",
-        variant === "subtle" && "bg-muted text-primary hover:bg-[#e9eaef]",
-        variant === "primary" && "bg-primary text-primary-foreground shadow-soft hover:bg-[#1f2937]",
+        variant === "subtle" && "bg-muted text-primary hover:bg-[#e7e7e3]",
+        variant === "primary" && "bg-primary text-primary-foreground shadow-soft hover:bg-[#2a2a2a]",
         active && "bg-muted text-primary",
         className
       )}

@@ -6,7 +6,7 @@ import {
   Copy,
   BookOpen,
   Settings,
-  Wifi,
+  Circle,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Avatar } from "@/components/ui/avatar";
@@ -15,13 +15,67 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { getDuplicateQueueCount, getRotationQueueCount } from "@/lib/api";
 
-const NAV_ITEMS = [
-  { to: "/", label: "Dashboard", icon: LayoutGrid, end: true },
-  { to: "/batches", label: "Batches", icon: Layers },
-  { to: "/rotation-review", label: "Rotation Review", icon: RotateCw, queue: "rotation" as const },
-  { to: "/duplicate-review", label: "Duplicate Review", icon: Copy, queue: "duplicate" as const },
-  { to: "/card-log", label: "Card Log", icon: BookOpen },
+interface NavItem {
+  to: string;
+  label: string;
+  icon: typeof LayoutGrid;
+  end?: boolean;
+  queue?: "rotation" | "duplicate";
+}
+
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: "Overview",
+    items: [{ to: "/", label: "Dashboard", icon: LayoutGrid, end: true }],
+  },
+  {
+    label: "Processing",
+    items: [{ to: "/batches", label: "Batches", icon: Layers }],
+  },
+  {
+    label: "Review",
+    items: [
+      { to: "/rotation-review", label: "Rotation Review", icon: RotateCw, queue: "rotation" },
+      { to: "/duplicate-review", label: "Duplicate Review", icon: Copy, queue: "duplicate" },
+    ],
+  },
+  {
+    label: "History",
+    items: [{ to: "/card-log", label: "Card Log", icon: BookOpen }],
+  },
 ];
+
+function NavRow({ item, count }: { item: NavItem; count: number }) {
+  return (
+    <NavLink
+      to={item.to}
+      end={item.end}
+      className={({ isActive }) =>
+        cn(
+          "group flex items-center justify-between rounded-lg px-2.5 py-[7px] text-body font-medium transition-colors duration-150",
+          isActive
+            ? "bg-muted text-primary"
+            : "text-muted-foreground hover:bg-muted/70 hover:text-primary"
+        )
+      }
+    >
+      <span className="flex items-center gap-2.5">
+        <item.icon className="h-[16px] w-[16px]" strokeWidth={2} />
+        {item.label}
+      </span>
+      {count > 0 && (
+        <Badge variant={item.queue === "rotation" ? "lavender" : "peach"} className="px-1.5 py-0 text-[10px]">
+          {count}
+        </Badge>
+      )}
+    </NavLink>
+  );
+}
 
 export function Sidebar() {
   const { user, logout } = useAuth();
@@ -43,77 +97,51 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="fixed left-6 top-6 bottom-6 z-30 flex w-[280px] flex-col rounded-3xl border border-border bg-surface p-4 shadow-float">
-      <div className="flex items-center gap-2.5 px-2 pb-6 pt-2">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground font-semibold">
-          CT
+    <aside className="fixed inset-y-0 left-0 z-30 flex w-[232px] flex-col border-r border-border bg-surface">
+      <div className="flex items-center gap-2.5 border-b border-border px-4 py-4">
+        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-[11px] font-semibold text-primary-foreground">
+          CF
         </div>
-        <div>
-          <p className="text-card-title leading-tight text-primary">Card Tool</p>
-          <p className="text-caption text-muted-foreground">Processing pipeline</p>
+        <div className="min-w-0">
+          <p className="truncate text-card-title leading-tight text-primary">CardFlow</p>
+          <p className="truncate text-caption text-muted-foreground">Processing pipeline</p>
         </div>
       </div>
 
-      <nav className="flex flex-1 flex-col gap-1">
-        {NAV_ITEMS.map((item) => {
-          const count = item.queue ? queueCounts[item.queue] : 0;
-          return (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) =>
-                cn(
-                  "group flex items-center justify-between rounded-xl px-3 py-2.5 text-body font-medium transition-colors duration-150",
-                  isActive
-                    ? "bg-muted text-primary"
-                    : "text-muted-foreground hover:bg-muted/60 hover:text-primary"
-                )
-              }
-            >
-              <span className="flex items-center gap-3">
-                <item.icon className="h-[18px] w-[18px]" strokeWidth={2} />
-                {item.label}
-              </span>
-              {count > 0 && (
-                <Badge variant={item.queue === "rotation" ? "lavender" : "peach"}>
-                  {count}
-                </Badge>
-              )}
-            </NavLink>
-          );
-        })}
+      <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 py-4">
+        {NAV_GROUPS.map((group) => (
+          <div key={group.label} className="flex flex-col gap-0.5">
+            <p className="px-2.5 pb-1 text-caption font-semibold uppercase tracking-wider text-muted-foreground/70">
+              {group.label}
+            </p>
+            {group.items.map((item) => (
+              <NavRow key={item.to} item={item} count={item.queue ? queueCounts[item.queue] : 0} />
+            ))}
+          </div>
+        ))}
+
+        <div className="mt-auto flex flex-col gap-0.5 pt-2">
+          <p className="px-2.5 pb-1 text-caption font-semibold uppercase tracking-wider text-muted-foreground/70">
+            Administration
+          </p>
+          <NavRow item={{ to: "/settings", label: "Settings", icon: Settings }} count={0} />
+        </div>
       </nav>
 
-      <div className="flex flex-col gap-1 border-t border-border pt-3">
-        <NavLink
-          to="/settings"
-          className={({ isActive }) =>
-            cn(
-              "flex items-center gap-3 rounded-xl px-3 py-2.5 text-body font-medium transition-colors duration-150",
-              isActive
-                ? "bg-muted text-primary"
-                : "text-muted-foreground hover:bg-muted/60 hover:text-primary"
-            )
-          }
-        >
-          <Settings className="h-[18px] w-[18px]" strokeWidth={2} />
-          Settings
-        </NavLink>
-
-        <div className="mt-2 flex items-center gap-2 rounded-xl bg-muted px-3 py-2 text-caption text-accent-mint-foreground">
-          <Wifi className="h-3.5 w-3.5" />
+      <div className="flex flex-col gap-2 border-t border-border p-3">
+        <div className="flex items-center gap-1.5 rounded-lg bg-accent-mint px-2.5 py-1.5 text-caption font-medium text-accent-mint-foreground">
+          <Circle className="h-1.5 w-1.5 shrink-0 fill-current" />
           System operational
         </div>
 
         <button
           onClick={logout}
-          className="mt-2 flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors duration-150 hover:bg-muted"
+          className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors duration-150 hover:bg-muted"
         >
-          <Avatar name={user?.name ?? "?"} />
+          <Avatar name={user?.name ?? "?"} className="h-7 w-7 text-[10px]" />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-body font-medium text-primary">{user?.name}</p>
-            <p className="text-caption text-muted-foreground">Sign out</p>
+            <p className="truncate text-caption font-medium text-primary">{user?.name}</p>
+            <p className="truncate text-caption text-muted-foreground">Sign out</p>
           </div>
         </button>
       </div>

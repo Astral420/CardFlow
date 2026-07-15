@@ -1,17 +1,26 @@
 import { useEffect, useState, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Search, ImageOff, BookOpen, ExternalLink } from 'lucide-react'
+import { ImageOff, BookOpen, ExternalLink } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { listCards, listBatches, getCard } from '@/lib/api'
 import { ScanStatusBadge, DuplicateStatusBadge } from '@/components/shared/status-badge'
 import { EmptyState } from '@/components/shared/empty-state'
+import { PageHeader } from '@/components/shared/page-header'
+import { SectionLabel } from '@/components/shared/section-label'
+import { Toolbar } from '@/components/shared/toolbar'
 import { Badge } from '@/components/ui/badge'
+import { SearchBar } from '@/components/ui/search-bar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 import type { CardCrop } from '@/lib/types'
-//import { cn } from '@/lib/utils'
 
 const PAGE_SIZE = 48
+
+const selectClass = cn(
+  'h-9 rounded-lg border border-border bg-surface px-3 text-body text-primary outline-none',
+  'transition-colors duration-150 focus:border-primary/30 focus:ring-2 focus:ring-primary/10'
+)
 
 function CardThumb({ card, onClick }: { card: CardCrop; onClick: () => void }) {
   return (
@@ -19,7 +28,7 @@ function CardThumb({ card, onClick }: { card: CardCrop; onClick: () => void }) {
       initial={{ opacity: 0, scale: 0.97 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.15 }}
-      className="group relative cursor-pointer overflow-hidden rounded-2xl border border-border bg-muted shadow-soft transition-all duration-200 hover:shadow-float hover:-translate-y-0.5"
+      className="group relative cursor-pointer overflow-hidden rounded-xl border border-border bg-muted transition-all duration-150 hover:-translate-y-px hover:shadow-soft"
       onClick={onClick}
       role="button"
       tabIndex={0}
@@ -65,7 +74,7 @@ function CardDetailDrawer({ cropId, onClose }: { cropId: number; onClose: () => 
       >
         {isLoading ? (
           <div className="flex gap-6">
-            <Skeleton className="h-64 w-44 rounded-xl" />
+            <Skeleton className="h-64 w-44 rounded-lg" />
             <div className="flex-1 space-y-3">
               <Skeleton className="h-5 w-24 rounded-lg" />
               <Skeleton className="h-5 w-32 rounded-lg" />
@@ -78,30 +87,30 @@ function CardDetailDrawer({ cropId, onClose }: { cropId: number; onClose: () => 
               <img
                 src={detail.image_url}
                 alt={detail.original_filename}
-                className="h-64 w-auto rounded-xl border border-border bg-muted object-contain"
+                className="h-64 w-auto rounded-lg border border-border bg-muted object-contain"
               />
             ) : (
-              <div className="flex h-64 w-44 items-center justify-center rounded-xl border border-border bg-muted">
+              <div className="flex h-64 w-44 items-center justify-center rounded-lg border border-border bg-muted">
                 <ImageOff className="h-10 w-10 text-muted-foreground/40" />
               </div>
             )}
             <div className="flex flex-1 flex-col gap-3 overflow-auto">
               <div>
-                <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Status</p>
+                <SectionLabel>Status</SectionLabel>
                 <div className="mt-1 flex flex-wrap gap-2">
                   <ScanStatusBadge status={detail.status} />
                 </div>
               </div>
               <div>
-                <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Side</p>
+                <SectionLabel>Side</SectionLabel>
                 <Badge className="mt-1" variant={detail.side === 'front' ? 'blue' : 'neutral'}>{detail.side}</Badge>
               </div>
               <div>
-                <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Batch</p>
+                <SectionLabel>Batch</SectionLabel>
                 <p className="mt-1 text-body text-primary">#{detail.batch_id}</p>
               </div>
               <div>
-                <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Rotation confirmed</p>
+                <SectionLabel>Rotation confirmed</SectionLabel>
                 <p className="mt-1 text-body text-primary">
                   {detail.rotation_confirmed_at
                     ? new Date(detail.rotation_confirmed_at).toLocaleString()
@@ -110,7 +119,7 @@ function CardDetailDrawer({ cropId, onClose }: { cropId: number; onClose: () => 
               </div>
               {detail.aspect_ratio_ok != null && (
                 <div>
-                  <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Aspect ratio</p>
+                  <SectionLabel>Aspect ratio</SectionLabel>
                   <Badge className="mt-1" variant={detail.aspect_ratio_ok ? 'mint' : 'rose'}>
                     {detail.aspect_ratio_ok ? 'OK' : 'Out of tolerance'}
                   </Badge>
@@ -118,7 +127,7 @@ function CardDetailDrawer({ cropId, onClose }: { cropId: number; onClose: () => 
               )}
               {detail.duplicate_history?.length > 0 && (
                 <div>
-                  <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Duplicate flags</p>
+                  <SectionLabel>Duplicate flags</SectionLabel>
                   <div className="mt-1 space-y-1">
                     {detail.duplicate_history.map((d) => (
                       <DuplicateStatusBadge key={d.candidate_id} status={d.status as any} />
@@ -205,31 +214,24 @@ export function CardLogPage() {
   }, [isFetching, page])
 
   return (
-    <div className="space-y-6 py-2">
-      <div>
-        <h1 className="text-page-title text-primary">Card Log</h1>
-        <p className="mt-1 text-body text-muted-foreground">
-          Browse and search all processed cards across batches.
-        </p>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        title="Card Log"
+        description="Browse and search all processed cards across batches."
+      />
 
-      {/* Filters */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center flex-wrap">
-        <div className="relative max-w-sm flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Search by filename…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-xl border border-border bg-surface py-2.5 pl-9 pr-4 text-body text-primary placeholder:text-muted-foreground outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/10"
-          />
-        </div>
+      <Toolbar className="border-b border-border pb-4">
+        <SearchBar
+          placeholder="Search by filename…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="max-w-xs"
+        />
 
         <select
           value={batchFilter ?? ''}
           onChange={(e) => setBatchFilter(e.target.value ? Number(e.target.value) : undefined)}
-          className="rounded-xl border border-border bg-surface px-3 py-2.5 text-body text-primary outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/10"
+          className={selectClass}
         >
           <option value="">All Batches</option>
           {batches?.map((b) => (
@@ -242,14 +244,14 @@ export function CardLogPage() {
         <select
           value={statusFilter ?? ''}
           onChange={(e) => setStatusFilter(e.target.value || undefined)}
-          className="rounded-xl border border-border bg-surface px-3 py-2.5 text-body text-primary outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/10"
+          className={selectClass}
         >
           <option value="">All Statuses</option>
           <option value="pending">Pending</option>
           <option value="cropped">Cropped</option>
           <option value="crop_failed">Crop Failed</option>
         </select>
-      </div>
+      </Toolbar>
 
       {/* Card count */}
       {!isLoading && (
@@ -263,7 +265,7 @@ export function CardLogPage() {
       {isLoading && offset === 0 ? (
         <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10">
           {Array.from({ length: 20 }).map((_, i) => (
-            <Skeleton key={i} className="aspect-[2.5/3.5] rounded-2xl" />
+            <Skeleton key={i} className="aspect-[2.5/3.5] rounded-xl" />
           ))}
         </div>
       ) : !allCards.length ? (

@@ -59,7 +59,7 @@ export function UploadBatchDialog({ trigger }: { trigger: React.ReactNode }) {
             onDrop={handleDrop}
             onClick={() => inputRef.current?.click()}
             className={cn(
-              "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-colors duration-150",
+              "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors duration-150",
               isDragging ? "border-primary bg-muted" : "border-border hover:bg-muted/50"
             )}
           >

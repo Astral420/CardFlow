@@ -2,6 +2,19 @@ import type { ReactNode } from "react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
+type Accent = "lavender" | "blue" | "peach" | "mint" | "rose";
+
+// Explicit class map — Tailwind's compiler can only pick up statically
+// written class names, so string-templating `bg-accent-${accent}` would
+// silently produce no styles at build time.
+const ACCENT_CLASSES: Record<Accent, string> = {
+  lavender: "bg-accent-lavender text-accent-lavender-foreground",
+  blue: "bg-accent-blue text-accent-blue-foreground",
+  peach: "bg-accent-peach text-accent-peach-foreground",
+  mint: "bg-accent-mint text-accent-mint-foreground",
+  rose: "bg-accent-rose text-accent-rose-foreground",
+};
+
 export function StatCard({
   label,
   value,
@@ -13,17 +26,17 @@ export function StatCard({
   label: string;
   value: ReactNode;
   icon?: ReactNode;
-  accent?: "lavender" | "blue" | "peach" | "mint" | "rose";
+  accent?: Accent;
   hint?: string;
   className?: string;
 }) {
   return (
-    <Card className={cn("flex items-center gap-4 p-5", className)}>
+    <Card className={cn("flex items-center gap-4 p-4", className)}>
       {icon && (
         <div
           className={cn(
-            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
-            `bg-accent-${accent} text-accent-${accent}-foreground`
+            "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
+            ACCENT_CLASSES[accent]
           )}
         >
           {icon}

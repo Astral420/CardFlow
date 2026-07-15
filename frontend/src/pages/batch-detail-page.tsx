@@ -13,10 +13,13 @@ import {
 } from '@/lib/api'
 import { BatchStatusBadge, ScanStatusBadge } from '@/components/shared/status-badge'
 import { EmptyState } from '@/components/shared/empty-state'
+import { SectionLabel } from '@/components/shared/section-label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ProgressBar } from '@/components/ui/progress-bar'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 import type { BatchDuplicatePair, RawScan } from '@/lib/types'
 
 // --- Shared helpers ---
@@ -51,8 +54,8 @@ function ScanThumbnail({ scan, onClick }: { scan: RawScan; onClick: () => void }
     <motion.div
       initial={{ opacity: 0, scale: 0.97 }}
       animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.18 }}
-      className={`group relative cursor-pointer overflow-hidden rounded-2xl border bg-muted shadow-soft transition-all duration-200 hover:shadow-float hover:-translate-y-0.5 ${scan.is_duplicate ? 'border-red-400/40 opacity-50' : 'border-border'
+      transition={{ duration: 0.16 }}
+      className={`group relative cursor-pointer overflow-hidden rounded-xl border bg-muted transition-all duration-150 hover:-translate-y-px hover:shadow-soft ${scan.is_duplicate ? 'border-accent-rose-solid/40 opacity-50' : 'border-border'
         }`}
       onClick={onClick}
       role="button"
@@ -208,31 +211,31 @@ function InspectorDrawer({ scan, onClose }: { scan: RawScan; onClose: () => void
           )}
           <div className="flex flex-1 flex-col gap-3">
             <div className="space-y-1">
-              <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Status</p>
+              <SectionLabel>Status</SectionLabel>
               <ScanStatusBadge status={scan.status} />
             </div>
             {scan.is_duplicate && (
               <div className="space-y-1">
-                <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Duplicate</p>
+                <SectionLabel>Duplicate</SectionLabel>
                 <Badge variant="rose">Confirmed Duplicate</Badge>
               </div>
             )}
             <div className="space-y-1">
-              <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Side</p>
+              <SectionLabel>Side</SectionLabel>
               <Badge variant={scan.side === 'front' ? 'blue' : 'neutral'}>{scan.side}</Badge>
             </div>
             <div className="space-y-1">
-              <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Filename</p>
+              <SectionLabel>Filename</SectionLabel>
               <p className="break-all text-body text-primary">{scan.original_filename}</p>
             </div>
             {scan.rotation_degrees !== 0 && (
               <div className="space-y-1">
-                <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Rotation</p>
+                <SectionLabel>Rotation</SectionLabel>
                 <p className="text-body text-primary">{scan.rotation_degrees}\u00b0</p>
               </div>
             )}
             <div className="space-y-1">
-              <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Scan ID</p>
+              <SectionLabel>Scan ID</SectionLabel>
               <p className="text-body text-primary">#{scan.id}</p>
             </div>
             {scan.thumbnail_url && (
@@ -275,8 +278,8 @@ function ScoreBar({ label, value }: { label: string; value: number | null }) {
   return (
     <div className="space-y-1">
       <div className="flex justify-between">
-        <span className="text-[11px] text-muted-foreground">{label}</span>
-        <span className="text-[11px] font-semibold text-primary">
+        <span className="text-caption text-muted-foreground">{label}</span>
+        <span className="text-caption font-semibold text-primary">
           {pct != null ? `${pct}%` : 'N/A'}
         </span>
       </div>
@@ -312,8 +315,8 @@ function DuplicatePairCard({ pair }: { pair: BatchDuplicatePair }) {
     <motion.div
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2 }}
-      className="rounded-2xl border border-border bg-surface shadow-soft overflow-hidden"
+      transition={{ duration: 0.18 }}
+      className="overflow-hidden rounded-xl border border-border bg-surface shadow-soft"
     >
       {/* Header */}
       <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-4 py-2.5">
@@ -337,7 +340,7 @@ function DuplicatePairCard({ pair }: { pair: BatchDuplicatePair }) {
         <div className="flex-1 p-4 space-y-3">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="h-3.5 w-3.5 text-accent-mint-foreground" />
-            <span className="text-caption font-semibold text-muted-foreground uppercase tracking-wider">Kept</span>
+            <SectionLabel>Kept</SectionLabel>
             <Badge variant="mint" className="text-[10px]">{pair.kept.side}</Badge>
           </div>
           {pair.kept.image_url ? (
@@ -345,10 +348,10 @@ function DuplicatePairCard({ pair }: { pair: BatchDuplicatePair }) {
               src={pair.kept.image_url}
               alt={pair.kept.original_filename}
               rotationDegrees={pair.kept.rotation_degrees}
-              className="aspect-[2.5/3.5] w-full rounded-xl border border-border"
+              className="aspect-[2.5/3.5] w-full rounded-lg border border-border"
             />
           ) : (
-            <div className="flex aspect-[2.5/3.5] w-full items-center justify-center rounded-xl border border-border bg-muted">
+            <div className="flex aspect-[2.5/3.5] w-full items-center justify-center rounded-lg border border-border bg-muted">
               <ImageOff className="h-8 w-8 text-muted-foreground/30" />
             </div>
           )}
@@ -356,7 +359,7 @@ function DuplicatePairCard({ pair }: { pair: BatchDuplicatePair }) {
             {pair.kept.original_filename}
           </p>
           {pair.kept.rotation_degrees !== 0 && (
-            <p className="text-[11px] text-muted-foreground">\u21bb {pair.kept.rotation_degrees}\u00b0</p>
+            <p className="text-caption text-muted-foreground">\u21bb {pair.kept.rotation_degrees}\u00b0</p>
           )}
         </div>
 
@@ -366,10 +369,10 @@ function DuplicatePairCard({ pair }: { pair: BatchDuplicatePair }) {
         </div>
 
         {/* Removed */}
-        <div className="flex-1 p-4 space-y-3 border-l border-border bg-accent-rose/5">
+        <div className="flex-1 p-4 space-y-3 border-l border-border bg-accent-rose/10">
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-3.5 w-3.5 text-accent-rose-foreground" />
-            <span className="text-caption font-semibold text-muted-foreground uppercase tracking-wider">Removed</span>
+            <SectionLabel>Removed</SectionLabel>
             <Badge variant="rose" className="text-[10px]">{pair.removed.side}</Badge>
           </div>
           {pair.removed.image_url ? (
@@ -377,10 +380,10 @@ function DuplicatePairCard({ pair }: { pair: BatchDuplicatePair }) {
               src={pair.removed.image_url}
               alt={pair.removed.original_filename}
               rotationDegrees={pair.removed.rotation_degrees}
-              className="aspect-[2.5/3.5] w-full rounded-xl border border-red-300/40 opacity-70"
+              className="aspect-[2.5/3.5] w-full rounded-lg border border-accent-rose-solid/30 opacity-70"
             />
           ) : (
-            <div className="flex aspect-[2.5/3.5] w-full items-center justify-center rounded-xl border border-border bg-muted">
+            <div className="flex aspect-[2.5/3.5] w-full items-center justify-center rounded-lg border border-border bg-muted">
               <ImageOff className="h-8 w-8 text-muted-foreground/30" />
             </div>
           )}
@@ -388,7 +391,7 @@ function DuplicatePairCard({ pair }: { pair: BatchDuplicatePair }) {
             {pair.removed.original_filename}
           </p>
           {pair.removed.rotation_degrees !== 0 && (
-            <p className="text-[11px] text-muted-foreground">\u21bb {pair.removed.rotation_degrees}\u00b0</p>
+            <p className="text-caption text-muted-foreground">\u21bb {pair.removed.rotation_degrees}\u00b0</p>
           )}
         </div>
       </div>
@@ -502,7 +505,7 @@ export function BatchDetailPage() {
   ]
 
   return (
-    <div className="space-y-6 py-2">
+    <div className="space-y-5">
       <Link
         to="/batches"
         className="inline-flex items-center gap-2 text-caption font-medium text-muted-foreground transition-colors hover:text-primary"
@@ -513,12 +516,12 @@ export function BatchDetailPage() {
 
       {batchLoading ? (
         <div className="space-y-3">
-          <Skeleton className="h-9 w-64 rounded-xl" />
+          <Skeleton className="h-9 w-64 rounded-lg" />
           <Skeleton className="h-5 w-40 rounded-lg" />
           <Skeleton className="h-3 w-full rounded-full" />
         </div>
       ) : batch ? (
-        <div className="rounded-3xl border border-border bg-surface p-6 shadow-soft">
+        <div className="rounded-xl border border-border bg-surface p-5 shadow-soft">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-2">
               <div className="flex items-center gap-3 flex-wrap">
@@ -536,10 +539,12 @@ export function BatchDetailPage() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {hasCroppedImages && (
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={handleExport}
                   disabled={isExporting}
-                  className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2 text-caption font-semibold text-primary shadow-soft transition-all duration-150 hover:bg-muted hover:shadow-float disabled:cursor-not-allowed disabled:opacity-60"
+                  className="gap-2"
                 >
                   {isExporting ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -547,13 +552,15 @@ export function BatchDetailPage() {
                     <Download className="h-3.5 w-3.5" />
                   )}
                   {isExporting ? 'Preparing\u2026' : 'Download ZIP'}
-                </button>
+                </Button>
               )}
               {showForceAdvance && (
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => forceAdvanceMutation.mutate()}
                   disabled={forceAdvanceMutation.isPending}
-                  className="inline-flex items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-caption font-semibold text-amber-600 shadow-soft transition-all duration-150 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="gap-2 border-accent-peach-solid/40 bg-accent-peach text-accent-peach-foreground hover:bg-accent-peach/70"
                 >
                   {forceAdvanceMutation.isPending ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -561,7 +568,7 @@ export function BatchDetailPage() {
                     <AlertTriangle className="h-3.5 w-3.5" />
                   )}
                   Force Advance
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -572,7 +579,7 @@ export function BatchDetailPage() {
                 initial={{ opacity: 0, y: -4 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
-                className="mt-2 text-caption text-red-500"
+                className="mt-2 text-caption text-accent-rose-foreground"
               >
                 {apiErrorMessage(forceAdvanceMutation.error)}
               </motion.p>
@@ -582,14 +589,14 @@ export function BatchDetailPage() {
                 initial={{ opacity: 0, y: -4 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
-                className="mt-2 text-caption text-red-500"
+                className="mt-2 text-caption text-accent-rose-foreground"
               >
                 {exportError}
               </motion.p>
             )}
           </AnimatePresence>
 
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-5">
             {[
               { label: 'Total Scans', value: batch.counts.scans },
               { label: 'Cropped', value: batch.counts.cropped },
@@ -599,10 +606,12 @@ export function BatchDetailPage() {
             ].map(({ label, value, highlight }) => (
               <div
                 key={label}
-                className={`rounded-xl px-3 py-2 text-center transition-colors ${highlight ? 'bg-amber-500/10 ring-1 ring-amber-500/30' : 'bg-muted'
-                  }`}
+                className={cn(
+                  'rounded-lg px-3 py-2 text-center transition-colors',
+                  highlight ? 'bg-accent-peach ring-1 ring-accent-peach-solid/30' : 'bg-muted'
+                )}
               >
-                <p className={`text-section font-bold ${highlight ? 'text-amber-600' : 'text-primary'}`}>{value}</p>
+                <p className={cn('text-section font-bold', highlight ? 'text-accent-peach-foreground' : 'text-primary')}>{value}</p>
                 <p className="text-caption text-muted-foreground">{label}</p>
               </div>
             ))}
@@ -666,19 +675,19 @@ export function BatchDetailPage() {
               transition={{ duration: 0.15 }}
             >
               <div className="mb-3">
-                <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">
+                <SectionLabel>
                   Scans {scans ? `(${scans.length})` : ''}
                   {duplicateCount > 0 && (
                     <span className="ml-2 normal-case font-normal text-muted-foreground/60">
                       \u2014 {(scans?.filter(s => !s.is_duplicate) ?? []).length} unique, {duplicateCount} duplicate
                     </span>
                   )}
-                </p>
+                </SectionLabel>
               </div>
               {scansLoading ? (
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8">
                   {Array.from({ length: 16 }).map((_, i) => (
-                    <Skeleton key={i} className="aspect-[2.5/3.5] rounded-2xl" />
+                    <Skeleton key={i} className="aspect-[2.5/3.5] rounded-xl" />
                   ))}
                 </div>
               ) : !sortedScans?.length ? (
@@ -710,9 +719,9 @@ export function BatchDetailPage() {
               transition={{ duration: 0.15 }}
             >
               <div className="mb-4">
-                <p className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">
+                <SectionLabel>
                   Confirmed Duplicates {duplicates ? `(${duplicates.length})` : ''}
-                </p>
+                </SectionLabel>
                 <p className="mt-0.5 text-caption text-muted-foreground">
                   These cards were confirmed as duplicates and are excluded from the ZIP export.
                   The left card is kept; the right is removed.
@@ -721,7 +730,7 @@ export function BatchDetailPage() {
               {duplicatesLoading ? (
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {Array.from({ length: 3 }).map((_, i) => (
-                    <Skeleton key={i} className="h-96 rounded-2xl" />
+                    <Skeleton key={i} className="h-96 rounded-xl" />
                   ))}
                 </div>
               ) : !duplicates?.length ? (

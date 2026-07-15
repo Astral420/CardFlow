@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -23,7 +25,7 @@
   }
 
   ::selection {
-    background: #d6d9ff;
+    background: #e4e4fb;
   }
 
   :focus-visible {
@@ -37,8 +39,11 @@
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: #e2e4e9;
+    background: #e2e2df;
     border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #d3d3cf;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
