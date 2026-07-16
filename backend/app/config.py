@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     crop_output_height: int = 1050
     expected_card_aspect_ratio: float = 3.5 / 2.5
     aspect_ratio_tolerance: float = 0.15  # tune empirically, see spec Section 11
-    crop_padding_fraction: float = 0.04
+    crop_padding_fraction: float = 0.07
     crop_padding_min_pixels: int = 10
     scan_background_threshold: int = 8
 

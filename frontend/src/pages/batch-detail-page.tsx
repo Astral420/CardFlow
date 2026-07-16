@@ -74,25 +74,42 @@ function ScanThumbnail({ scan, onClick }: { scan: RawScan; onClick: () => void }
           <ImageOff className="h-8 w-8 text-muted-foreground/40" />
         </div>
       )}
+
+      {/* Hover overlay */}
       <div className="absolute inset-0 flex items-center justify-center bg-primary/60 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
         <Maximize2 className="h-6 w-6 text-white" />
       </div>
+
+      {/* Filename tooltip bar */}
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-primary/80 to-transparent p-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
         <p className="truncate text-caption font-medium text-white">{scan.original_filename}</p>
       </div>
-      <div className="absolute right-2 top-2 flex flex-col items-end gap-1">
-        <Badge variant={scan.side === 'front' ? 'blue' : 'neutral'} className="text-[10px]">
+
+      {/* Side chip — top-right */}
+      <div className="absolute right-2 top-2">
+        <span
+          className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold leading-none shadow-sm backdrop-blur-sm ${
+            scan.side === 'front'
+              ? 'bg-accent-blue/90 text-accent-blue-foreground'
+              : 'bg-muted/90 text-muted-foreground'
+          }`}
+        >
           {scan.side}
-        </Badge>
-        {scan.is_duplicate && (
-          <Badge variant="rose" className="text-[10px]">
-            Duplicate
-          </Badge>
-        )}
+        </span>
       </div>
+
+      {/* Duplicate chip — top-left */}
+      {scan.is_duplicate && (
+        <div className="absolute left-2 top-2">
+          <span className="inline-flex items-center rounded-md bg-accent-rose/90 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-accent-rose-foreground shadow-sm backdrop-blur-sm">
+            Dup
+          </span>
+        </div>
+      )}
     </motion.div>
   )
 }
+
 
 function FullscreenLightbox({
   isOpen,
@@ -186,69 +203,89 @@ function InspectorDrawer({ scan, onClose }: { scan: RawScan; onClose: () => void
         description={`Scan #${scan.id} \u2014 ${scan.side} face`}
         className="max-w-2xl"
       >
-        <div className="flex gap-6">
-          {scan.thumbnail_url ? (
-            <div 
-              className="group relative h-64 w-44 shrink-0 cursor-pointer overflow-hidden rounded-xl border border-border"
-              onClick={() => setIsLightboxOpen(true)}
-            >
-              <RotatedImage
-                src={scan.thumbnail_url}
-                alt={scan.original_filename}
-                rotationDegrees={scan.rotation_degrees}
-                className="h-full w-full"
-              />
-              <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all group-hover:bg-black/20 group-hover:opacity-100">
-                <div className="rounded-full bg-white/90 p-2 text-primary shadow-sm">
-                  <Maximize2 className="h-5 w-5" />
+        <div className="flex gap-5">
+          {/* ── Left: image panel ── */}
+          <div className="flex shrink-0 flex-col gap-2">
+            {scan.thumbnail_url ? (
+              <button
+                type="button"
+                onClick={() => setIsLightboxOpen(true)}
+                className="group relative h-64 w-44 overflow-hidden rounded-xl border border-border bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border"
+                aria-label="Open full image"
+              >
+                <RotatedImage
+                  src={scan.thumbnail_url}
+                  alt={scan.original_filename}
+                  rotationDegrees={scan.rotation_degrees}
+                  className="h-full w-full"
+                />
+                {/* Zoom overlay */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-primary/0 opacity-0 transition-all duration-200 group-hover:bg-primary/40 group-hover:opacity-100">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-surface/90 shadow-float backdrop-blur-sm">
+                    <Maximize2 className="h-4 w-4 text-primary" />
+                  </div>
+                  <span className="text-[10px] font-semibold text-white drop-shadow">Expand</span>
                 </div>
-              </div>
-            </div>
-          ) : (
-            <div className="flex h-64 w-44 shrink-0 items-center justify-center rounded-xl border border-border bg-muted">
-              <ImageOff className="h-10 w-10 text-muted-foreground/40" />
-            </div>
-          )}
-          <div className="flex flex-1 flex-col gap-3">
-            <div className="space-y-1">
-              <SectionLabel>Status</SectionLabel>
-              <ScanStatusBadge status={scan.status} />
-            </div>
-            {scan.is_duplicate && (
-              <div className="space-y-1">
-                <SectionLabel>Duplicate</SectionLabel>
-                <Badge variant="rose">Confirmed Duplicate</Badge>
+              </button>
+            ) : (
+              <div className="flex h-64 w-44 items-center justify-center rounded-xl border border-border bg-muted">
+                <ImageOff className="h-10 w-10 text-muted-foreground/40" />
               </div>
             )}
-            <div className="space-y-1">
-              <SectionLabel>Side</SectionLabel>
-              <Badge variant={scan.side === 'front' ? 'blue' : 'neutral'}>{scan.side}</Badge>
-            </div>
-            <div className="space-y-1">
-              <SectionLabel>Filename</SectionLabel>
-              <p className="break-all text-body text-primary">{scan.original_filename}</p>
-            </div>
-            {scan.rotation_degrees !== 0 && (
-              <div className="space-y-1">
-                <SectionLabel>Rotation</SectionLabel>
-                <p className="text-body text-primary">{scan.rotation_degrees}\u00b0</p>
-              </div>
-            )}
-            <div className="space-y-1">
-              <SectionLabel>Scan ID</SectionLabel>
-              <p className="text-body text-primary">#{scan.id}</p>
-            </div>
             {scan.thumbnail_url && (
               <a
                 href={scan.thumbnail_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-auto inline-flex items-center gap-2 text-caption font-medium text-muted-foreground hover:text-primary transition-colors"
+                className="flex items-center justify-center gap-1.5 rounded-lg border border-border bg-muted/60 px-2.5 py-1.5 text-caption font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-primary"
               >
-                <ExternalLink className="h-3.5 w-3.5" />
+                <ExternalLink className="h-3 w-3" />
                 Open full image
               </a>
             )}
+          </div>
+
+          {/* ── Right: metadata column ── */}
+          <div className="flex min-w-0 flex-1 flex-col divide-y divide-border rounded-xl border border-border bg-muted/30 overflow-hidden">
+            {/* Status */}
+            <div className="flex items-center justify-between px-3.5 py-2.5">
+              <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Status</span>
+              <ScanStatusBadge status={scan.status} />
+            </div>
+
+            {/* Side */}
+            <div className="flex items-center justify-between px-3.5 py-2.5">
+              <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Side</span>
+              <Badge variant={scan.side === 'front' ? 'blue' : 'neutral'}>{scan.side}</Badge>
+            </div>
+
+            {/* Duplicate flag — only if flagged */}
+            {scan.is_duplicate && (
+              <div className="flex items-center justify-between px-3.5 py-2.5">
+                <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Duplicate</span>
+                <Badge variant="rose">Confirmed</Badge>
+              </div>
+            )}
+
+            {/* Rotation — only if non-zero */}
+            {scan.rotation_degrees !== 0 && (
+              <div className="flex items-center justify-between px-3.5 py-2.5">
+                <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Rotation</span>
+                <span className="text-body font-medium text-primary">{scan.rotation_degrees}°</span>
+              </div>
+            )}
+
+            {/* Scan ID */}
+            <div className="flex items-center justify-between px-3.5 py-2.5">
+              <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Scan ID</span>
+              <span className="rounded-md bg-muted px-2 py-0.5 font-mono text-caption text-primary">#{scan.id}</span>
+            </div>
+
+            {/* Filename — full-width row */}
+            <div className="flex flex-col gap-1 px-3.5 py-2.5">
+              <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Filename</span>
+              <p className="break-all text-body text-primary leading-snug">{scan.original_filename}</p>
+            </div>
           </div>
         </div>
       </DialogContent>
@@ -359,7 +396,7 @@ function DuplicatePairCard({ pair }: { pair: BatchDuplicatePair }) {
             {pair.kept.original_filename}
           </p>
           {pair.kept.rotation_degrees !== 0 && (
-            <p className="text-caption text-muted-foreground">\u21bb {pair.kept.rotation_degrees}\u00b0</p>
+            <p className="text-caption text-muted-foreground">↻ {pair.kept.rotation_degrees}°</p>
           )}
         </div>
 
@@ -391,7 +428,7 @@ function DuplicatePairCard({ pair }: { pair: BatchDuplicatePair }) {
             {pair.removed.original_filename}
           </p>
           {pair.removed.rotation_degrees !== 0 && (
-            <p className="text-caption text-muted-foreground">\u21bb {pair.removed.rotation_degrees}\u00b0</p>
+            <p className="text-caption text-muted-foreground">↻ {pair.removed.rotation_degrees}°</p>
           )}
         </div>
       </div>
@@ -440,6 +477,7 @@ export function BatchDetailPage() {
   const [exportError, setExportError] = useState<string | null>(null)
   const [isExporting, setIsExporting] = useState(false)
   const [activeTab, setActiveTab] = useState<TabId>('scans')
+  const [mountId] = useState(() => Math.random().toString(36).slice(2, 9))
   const queryClient = useQueryClient()
 
   const { data: batch, isLoading: batchLoading } = useQuery({
@@ -656,10 +694,7 @@ export function BatchDetailPage() {
                 </span>
               )}
               {activeTab === tab.id && (
-                <motion.div
-                  layoutId="tab-indicator"
-                  className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-primary"
-                />
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-primary" />
               )}
             </button>
           ))}
@@ -679,7 +714,7 @@ export function BatchDetailPage() {
                   Scans {scans ? `(${scans.length})` : ''}
                   {duplicateCount > 0 && (
                     <span className="ml-2 normal-case font-normal text-muted-foreground/60">
-                      \u2014 {(scans?.filter(s => !s.is_duplicate) ?? []).length} unique, {duplicateCount} duplicate
+                      — {(scans?.filter(s => !s.is_duplicate) ?? []).length} unique, {duplicateCount} duplicate
                     </span>
                   )}
                 </SectionLabel>

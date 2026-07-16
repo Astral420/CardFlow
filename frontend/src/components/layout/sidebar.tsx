@@ -7,9 +7,9 @@ import {
   BookOpen,
   Settings,
   Circle,
+  LogOut,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
@@ -99,9 +99,11 @@ export function Sidebar() {
   return (
     <aside className="fixed inset-y-0 left-0 z-30 flex w-[232px] flex-col border-r border-border bg-surface">
       <div className="flex items-center gap-2.5 border-b border-border px-4 py-4">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-[11px] font-semibold text-primary-foreground">
-          CF
-        </div>
+        <img
+          src="/favicon.png"
+          alt="CardFlow Logo"
+          className="h-8 w-8 rounded-md object-contain"
+        />
         <div className="min-w-0">
           <p className="truncate text-card-title leading-tight text-primary">CardFlow</p>
           <p className="truncate text-caption text-muted-foreground">Processing pipeline</p>
@@ -136,13 +138,13 @@ export function Sidebar() {
 
         <button
           onClick={logout}
-          className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors duration-150 hover:bg-muted"
+          className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-muted"
         >
-          <Avatar name={user?.name ?? "?"} className="h-7 w-7 text-[10px]" />
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0">
             <p className="truncate text-caption font-medium text-primary">{user?.name}</p>
             <p className="truncate text-caption text-muted-foreground">Sign out</p>
           </div>
+          <LogOut className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </button>
       </div>
     </aside>

@@ -25,31 +25,22 @@ const item = {
 
 function BatchRow({ batch }: { batch: Batch }) {
   return (
-    <Link to={`/batches/${batch.id}`}>
-      <motion.div
-        variants={item}
-        className="group flex items-center justify-between rounded-lg border border-border bg-surface px-3.5 py-2.5 transition-colors duration-150 hover:bg-muted/40"
-      >
-        <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted">
-            <Layers className="h-3.5 w-3.5 text-muted-foreground" />
-          </div>
-          <div>
-            <p className="text-body font-medium text-primary">
-              {batch.source_label ?? `Batch #${batch.id}`}
-            </p>
-            <p className="text-caption text-muted-foreground">
-              {new Date(batch.created_at).toLocaleDateString('en-US', {
-                month: 'short', day: 'numeric', year: 'numeric',
-              })}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <BatchStatusBadge status={batch.status} />
-          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-        </div>
-      </motion.div>
+    <Link
+      to={`/batches/${batch.id}`}
+      className="group flex items-center gap-4 px-4 py-3 transition-colors duration-150 hover:bg-muted/40"
+    >
+      <p className="min-w-0 flex-1 truncate text-body font-medium text-primary">
+        {batch.source_label ?? `Batch #${batch.id}`}
+      </p>
+      <p className="shrink-0 text-caption text-muted-foreground tabular-nums">
+        {new Date(batch.created_at).toLocaleDateString('en-US', {
+          month: 'short', day: 'numeric', year: 'numeric',
+        })}
+      </p>
+      <div className="flex shrink-0 items-center gap-2">
+        <BatchStatusBadge status={batch.status} />
+        <ArrowRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+      </div>
     </Link>
   )
 }
@@ -222,9 +213,11 @@ export function DashboardPage() {
             />
           </Card>
         ) : (
-          <motion.div className="space-y-2" variants={container} initial="hidden" animate="show">
-            {batches.map((b) => <BatchRow key={b.id} batch={b} />)}
-          </motion.div>
+          <Card className="overflow-hidden">
+            <motion.div className="divide-y divide-border" variants={container} initial="hidden" animate="show">
+              {batches.map((b) => <BatchRow key={b.id} batch={b} />)}
+            </motion.div>
+          </Card>
         )}
       </motion.div>
     </motion.div>

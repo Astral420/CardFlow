@@ -21,16 +21,14 @@ export default {
         ],
       },
       colors: {
-        background: "#F7F7F5",
-        surface: "#FFFFFF",
-        border: "#ECECEC",
+        background: "#F5F4FB",
+        surface: "#FDFCFF",
+        border: "#E5E3F5",
 
-        primary: {
-          DEFAULT: "#161616",
-          foreground: "#FFFFFF",
-        },
-        "muted-foreground": "#71717A",
-        muted: "#F1F1EE",
+        primary: "#1A1730",
+        "primary-foreground": "#FFFFFF",
+        "muted-foreground": "#6B6887",
+        muted: "#EEECF8",
 
         // Status-only accents. Never decorative — each pair communicates
         // one operational state (processing / info / warning / success / error).
@@ -70,9 +68,9 @@ export default {
       boxShadow: {
         // Minimal — borders do the heavy lifting; shadow only adds
         // separation for floating/overlay surfaces.
-        soft: "0 1px 2px 0 rgba(22, 22, 22, 0.03)",
-        float: "0 4px 12px -2px rgba(22, 22, 22, 0.07)",
-        "float-lg": "0 16px 40px -8px rgba(22, 22, 22, 0.14)",
+        soft: "0 1px 2px 0 rgba(90, 80, 160, 0.05)",
+        float: "0 4px 12px -2px rgba(90, 80, 160, 0.08)",
+        "float-lg": "0 16px 40px -8px rgba(90, 80, 160, 0.14)",
       },
       spacing: {
         4.5: "1.125rem",

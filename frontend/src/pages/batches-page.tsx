@@ -164,7 +164,15 @@ function BatchKanbanBoard({ batches }: { batches: Batch[] }) {
 export function BatchesPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<BatchStatus | 'all'>('all')
-  const [view, setView] = useState<'grid' | 'kanban'>('grid')
+  const [view, setView] = useState<'grid' | 'kanban'>(() => {
+    const stored = localStorage.getItem('batches-view')
+    return stored === 'kanban' ? 'kanban' : 'grid'
+  })
+
+  function handleSetView(v: 'grid' | 'kanban') {
+    localStorage.setItem('batches-view', v)
+    setView(v)
+  }
 
   const { data: batches, isLoading } = useQuery({
     queryKey: ['batches'],
@@ -220,7 +228,7 @@ export function BatchesPage() {
                   className={cn(
                     'rounded-full px-2.5 py-1 text-caption font-medium transition-colors duration-150',
                     statusFilter === f.value
-                      ? 'bg-primary text-primary-foreground'
+                      ? 'bg-primary text-white'
                       : 'text-muted-foreground hover:bg-muted hover:text-primary'
                   )}
                 >
@@ -239,7 +247,7 @@ export function BatchesPage() {
             variant={view === 'grid' ? 'subtle' : 'ghost'}
             active={view === 'grid'}
             className="h-8 w-8"
-            onClick={() => setView('grid')}
+            onClick={() => handleSetView('grid')}
           >
             <LayoutGrid className="h-4 w-4" />
           </IconButton>
@@ -248,7 +256,7 @@ export function BatchesPage() {
             variant={view === 'kanban' ? 'subtle' : 'ghost'}
             active={view === 'kanban'}
             className="h-8 w-8"
-            onClick={() => setView('kanban')}
+            onClick={() => handleSetView('kanban')}
           >
             <Columns className="h-4 w-4" />
           </IconButton>

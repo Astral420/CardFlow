@@ -40,7 +40,7 @@ def _order_points(pts: np.ndarray) -> np.ndarray:
 
 
 def _clean_mask(mask: np.ndarray) -> np.ndarray:
-    close_kernel = np.ones((9, 9), np.uint8)
+    close_kernel = np.ones((21, 21), np.uint8)
     open_kernel = np.ones((3, 3), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel, iterations=2)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_kernel, iterations=1)

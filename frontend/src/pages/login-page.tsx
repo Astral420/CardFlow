@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/auth";
@@ -35,11 +34,13 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm animate-lift-in rounded-2xl border border-border bg-surface p-8 shadow-float-lg">
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-            <Layers className="h-5 w-5" />
-          </div>
+          <img
+            src="/favicon.png"
+            alt="CardFlow"
+            className="h-12 w-12 rounded-xl object-contain"
+          />
           <div>
-            <h1 className="text-section text-primary">Card Tool</h1>
+            <h1 className="text-section text-primary">CardFlow</h1>
             <p className="mt-1 text-caption text-muted-foreground">
               Sign in to continue processing batches
             </p>
