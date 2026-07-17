@@ -40,7 +40,7 @@ def _order_points(pts: np.ndarray) -> np.ndarray:
 
 
 def _clean_mask(mask: np.ndarray) -> np.ndarray:
-    close_kernel = np.ones((21, 21), np.uint8)
+    close_kernel = np.ones((9, 9), np.uint8)
     open_kernel = np.ones((3, 3), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel, iterations=2)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_kernel, iterations=1)
@@ -50,9 +50,6 @@ def _clean_mask(mask: np.ndarray) -> np.ndarray:
 def _candidate_contours(gray: np.ndarray) -> list[np.ndarray]:
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
-    _, otsu = cv2.threshold(
-        blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-    )
     _, non_background = cv2.threshold(
         blurred,
         settings.scan_background_threshold,
@@ -64,8 +61,22 @@ def _candidate_contours(gray: np.ndarray) -> list[np.ndarray]:
     edge_kernel = np.ones((5, 5), np.uint8)
     edges = cv2.dilate(edges, edge_kernel, iterations=1)
 
+    # NOTE: an Otsu-thresholded mask used to be included here as a third
+    # candidate source. It has been removed. Otsu picks a single global
+    # split point from the image's own brightness histogram, which assumes
+    # the frame is roughly bimodal (object vs. background). Laminated/
+    # protector-sleeve scans on a near-black bed are not: they contain the
+    # background, the card border, the (often much brighter) printed
+    # artwork, and glare streaks off the sleeve, i.e. several brightness
+    # clusters. Otsu has no notion of "near-black scan background" and will
+    # happily draw its line between the artwork and everything else,
+    # isolating only the brightest interior panel as "foreground." That
+    # panel is a real, clean, solidly-shaped contour, so nothing downstream
+    # flags it as wrong -- it just happens to describe the art box, not the
+    # card. `non_background` (threshold against settings.scan_background_
+    # threshold) and its edge-augmented variant are both anchored to the
+    # actual near-black bed, which is the correct invariant for this rig.
     masks = [
-        _clean_mask(otsu),
         _clean_mask(non_background),
         _clean_mask(cv2.bitwise_or(non_background, edges)),
     ]
@@ -77,7 +88,9 @@ def _candidate_contours(gray: np.ndarray) -> list[np.ndarray]:
     return contours
 
 
-def _score_contour(contour: np.ndarray, image_area: int) -> tuple[float, float]:
+def _score_contour(
+    contour: np.ndarray, image_area: int, max_candidate_area: int
+) -> tuple[float, float]:
     rect = cv2.minAreaRect(contour)
     (_, (rect_w, rect_h), _) = rect
     if rect_w <= 0 or rect_h <= 0:
@@ -86,13 +99,24 @@ def _score_contour(contour: np.ndarray, image_area: int) -> tuple[float, float]:
     long_side = max(rect_w, rect_h)
     short_side = min(rect_w, rect_h)
     aspect_ratio = long_side / short_side if short_side > 0 else 0.0
-    area_ratio = cv2.contourArea(contour) / max(1, image_area)
+    contour_area = cv2.contourArea(contour)
+    area_ratio = contour_area / max(1, image_area)
     aspect_error = abs(aspect_ratio - settings.expected_card_aspect_ratio)
 
-    # Prefer card-shaped contours, with area as a tie-breaker. Keeping area in
-    # the score prevents a bright interior panel from beating the full dark edge
-    # or protector contour when both are present.
-    return (aspect_error - min(area_ratio, 0.95) * 0.25, area_ratio)
+    # Relative-size penalty, scored against the largest candidate in *this*
+    # image rather than a flat fraction of the whole scan bed. A flat
+    # area_ratio bonus (e.g. "+0.25 per 100% of image area") is calibrated
+    # to one particular camera distance/bed size; tighten the zoom or crop
+    # the scan bed differently and the same bonus stops being big enough to
+    # out-vote a small-but-conveniently-card-shaped interior panel (this is
+    # what let the Otsu art-box contour win before). Comparing against the
+    # largest candidate actually found in this frame keeps the penalty
+    # meaningful regardless of scan setup: a contour at 20% of the biggest
+    # candidate's area is suspect no matter how big the image is.
+    relative_size = contour_area / max(1, max_candidate_area)
+    size_penalty = (1 - relative_size) * 0.5
+
+    return (aspect_error + size_penalty, area_ratio)
 
 
 def _best_contour(contours: list[np.ndarray], image_shape: tuple[int, ...]) -> np.ndarray:
@@ -102,7 +126,11 @@ def _best_contour(contours: list[np.ndarray], image_shape: tuple[int, ...]) -> n
     if not candidates:
         raise ValueError("No contours found against the scan background")
 
-    return min(candidates, key=lambda c: _score_contour(c, image_area))
+    max_candidate_area = max(cv2.contourArea(c) for c in candidates)
+    return min(
+        candidates,
+        key=lambda c: _score_contour(c, image_area, int(max_candidate_area)),
+    )
 
 
 def _expanded_box(rect: tuple, image_shape: tuple[int, ...]) -> np.ndarray:
