@@ -27,6 +27,20 @@ def _make_scan_bytes(card_w: int, card_h: int, canvas_size: int = 400) -> bytes:
     return buf.tobytes()
 
 
+def _make_precropped_bytes(width: int, height: int) -> bytes:
+    """A card image with no scan-bed background left around it, simulating
+    an intake source (e.g. a scanner) that already auto-crops on-device.
+    A distinct marker in the top-left corner lets tests confirm the output
+    wasn't rotated/flipped relative to the input.
+    """
+    canvas = np.full((height, width, 3), (200, 200, 200), dtype=np.uint8)
+    marker = min(width, height) // 6
+    canvas[0:marker, 0:marker] = (0, 0, 220)  # red-ish marker, top-left, BGR
+    ok, buf = cv2.imencode(".jpg", canvas)
+    assert ok
+    return buf.tobytes()
+
+
 def test_auto_crop_accepts_card_aspect_ratio():
     image_bytes = _make_scan_bytes(card_w=125, card_h=175, canvas_size=400)
     result = auto_crop(image_bytes)
@@ -163,3 +177,78 @@ def test_auto_crop_laminated_card_front_and_back_are_consistent():
         f"differ by {relative_diff:.1%}, expected close agreement for the "
         "same physical card"
     )
+
+
+# --- Already-cropped input (e.g. a scanner that auto-crops on-device) ---
+#
+# Regression coverage for two bugs from the same root cause: contour
+# detection was being run against images that never had a scan-bed
+# background to begin with, which (a) failed the raw-scan aspect-ratio
+# tolerance far too often, since the "crop" it found was just the frame
+# itself with a margin that doesn't match a bare card, and (b) was liable to
+# introduce a spurious rotation via an unstable minAreaRect angle on a
+# near-full-frame contour, flipping images that were already upright.
+
+
+def test_auto_crop_accepts_already_cropped_input_with_no_background():
+    # Card fills the whole frame -- e.g. 750x1050 is the standard output
+    # canvas size, no black scan-bed border anywhere.
+    image_bytes = _make_precropped_bytes(750, 1050)
+    result = auto_crop(image_bytes)
+    assert result.aspect_ratio_ok is True
+    assert result.orientation == "portrait"
+
+
+def test_auto_crop_already_cropped_passthrough_does_not_rotate_or_resize():
+    width, height = 908, 1103
+    image_bytes = _make_precropped_bytes(width, height)
+    result = auto_crop(image_bytes)
+    decoded = cv2.imdecode(
+        np.frombuffer(result.image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR
+    )
+
+    # Same pixel dimensions as the input -- no perspective warp applied.
+    assert decoded.shape[1] == width
+    assert decoded.shape[0] == height
+
+    # The top-left marker is still top-left: nothing got rotated or flipped.
+    # Marker is BGR (0, 0, 220); background is gray (200, 200, 200) -- the
+    # blue channel cleanly tells them apart.
+    marker_region = decoded[0:20, 0:20]
+    assert int(marker_region[:, :, 0].mean()) < 50  # marker: blue channel ~0
+    opposite_corner = decoded[-20:, -20:]
+    assert int(opposite_corner[:, :, 0].mean()) > 150  # background: blue channel ~200
+
+
+def test_auto_crop_already_cropped_uses_widened_tolerance():
+    # A toploader/sleeve margin (or a slightly loose device crop) commonly
+    # pulls the measured ratio further from the bare-card ideal (1.4) than
+    # our own contour-based crops would. This should still be accepted even
+    # though it's well outside the raw-scan aspect_ratio_tolerance (0.15).
+    image_bytes = _make_precropped_bytes(900, 1100)  # ratio ~1.222
+    result = auto_crop(image_bytes)
+    assert abs(result.aspect_ratio - 3.5 / 2.5) > 0.15  # would fail the strict tolerance
+    assert result.aspect_ratio_ok is True
+
+
+def test_auto_crop_already_cropped_still_flags_wildly_wrong_ratio():
+    # Even on the passthrough path, something that isn't remotely
+    # card-shaped should still be caught rather than silently accepted.
+    image_bytes = _make_precropped_bytes(600, 600)  # square, ratio 1.0
+    result = auto_crop(image_bytes)
+    assert result.aspect_ratio_ok is False
+
+
+def test_auto_crop_raw_scan_with_background_is_unaffected():
+    # A real raw scan (card well inset from the frame edges, near-black
+    # bed all around) must still go through normal contour detection, not
+    # the already-cropped passthrough.
+    image_bytes = _make_scan_bytes(card_w=250, card_h=350, canvas_size=400)
+    result = auto_crop(image_bytes)
+    decoded = cv2.imdecode(
+        np.frombuffer(result.image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR
+    )
+    # The passthrough path never resizes; the normal path always outputs
+    # the fixed crop canvas size, so this confirms which path ran.
+    assert (decoded.shape[1], decoded.shape[0]) in {(750, 1050), (1050, 750)}
+    assert result.aspect_ratio_ok is True

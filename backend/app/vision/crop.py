@@ -5,6 +5,12 @@ the detected rectangle slightly so dark card edges are not mistaken for
 background, and perspective-warp while preserving portrait vs landscape
 orientation. The aspect-ratio safety check still flags suspect detections
 instead of silently corrupting downstream hashes.
+
+Some intake sources hand us images that are already cropped tight to the
+card (e.g. a scanner that auto-crops on-device) rather than a raw shot of
+the whole scan bed. Those are detected up front, before contour detection
+runs, and short-circuited to a passthrough path -- see
+`_perimeter_background_fraction` / `_passthrough_crop` below.
 """
 
 from dataclasses import dataclass
@@ -45,6 +51,67 @@ def _clean_mask(mask: np.ndarray) -> np.ndarray:
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel, iterations=2)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_kernel, iterations=1)
     return mask
+
+
+def _perimeter_background_fraction(gray: np.ndarray, threshold: int) -> float:
+    """Fraction of the image's own border pixels that read as scan background.
+
+    A raw, uncropped scan sits on a near-black bed, so its outermost row/
+    column of pixels is almost entirely background. An image that arrives
+    already cropped (e.g. by the scanning device itself) has little to no
+    such border left -- the card or its sleeve/toploader already runs to
+    the frame edge on most or all sides. This ratio is the signal used to
+    tell the two cases apart before deciding whether to run contour
+    detection at all.
+    """
+    top = gray[0, :]
+    bottom = gray[-1, :]
+    left = gray[:, 0]
+    right = gray[:, -1]
+    perimeter = np.concatenate([top, bottom, left, right])
+    return float(np.count_nonzero(perimeter <= threshold)) / perimeter.size
+
+
+def _passthrough_crop(image: np.ndarray) -> CropResult:
+    """Build a CropResult for input that's already cropped to the card.
+
+    There's no background bed around it for us to find and remove, so
+    there's nothing for contour detection + perspective warp to usefully
+    do. Worse, minAreaRect's angle estimate is unstable on a contour that
+    already spans (or nearly spans) the full frame -- exactly the
+    already-cropped case -- so running it anyway risks introducing a
+    spurious rotation/flip into an image that was already sitting upright.
+    Pass the pixels through untouched (re-encoding only) and validate
+    against a tolerance meant for input we didn't crop ourselves.
+    """
+    height, width = image.shape[:2]
+    long_side = max(width, height)
+    short_side = min(width, height)
+    aspect_ratio = long_side / short_side if short_side > 0 else 0.0
+    aspect_ratio_ok = (
+        abs(aspect_ratio - settings.expected_card_aspect_ratio)
+        <= settings.precropped_aspect_ratio_tolerance
+    )
+    orientation = "landscape" if width >= height else "portrait"
+
+    ok, buf = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    if not ok:
+        raise ValueError("Failed to encode cropped image")
+
+    bbox = [
+        [0.0, 0.0],
+        [float(width - 1), 0.0],
+        [float(width - 1), float(height - 1)],
+        [0.0, float(height - 1)],
+    ]
+
+    return CropResult(
+        image_bytes=buf.tobytes(),
+        bbox=bbox,
+        aspect_ratio=aspect_ratio,
+        aspect_ratio_ok=aspect_ratio_ok,
+        orientation=orientation,
+    )
 
 
 def _candidate_contours(gray: np.ndarray) -> list[np.ndarray]:
@@ -181,6 +248,13 @@ def auto_crop(image_bytes: bytes) -> CropResult:
         raise ValueError("Could not decode image")
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    bg_fraction = _perimeter_background_fraction(
+        gray, settings.scan_background_threshold
+    )
+    if bg_fraction <= settings.precropped_perimeter_bg_max_fraction:
+        return _passthrough_crop(image)
+
     contours = _candidate_contours(gray)
     contour = _best_contour(contours, image.shape)
     rect = cv2.minAreaRect(contour)

@@ -30,7 +30,9 @@ def _find_sibling(db: Session, raw_scan: RawScan) -> CardCrop | None:
     )
 
 
-def _next_pending(db: Session, batch_id: int | None) -> RotationNextOut | None:
+def _next_pending(
+    db: Session, batch_id: int | None, after_id: int | None = None
+) -> RotationNextOut | None:
     query = (
         db.query(CardCrop)
         .join(RawScan)
@@ -42,6 +44,8 @@ def _next_pending(db: Session, batch_id: int | None) -> RotationNextOut | None:
     )
     if batch_id is not None:
         query = query.filter(RawScan.batch_id == batch_id)
+    if after_id is not None:
+        query = query.filter(CardCrop.id > after_id)
 
     crop = query.first()
     if crop is None:
@@ -64,10 +68,11 @@ def _next_pending(db: Session, batch_id: int | None) -> RotationNextOut | None:
 @router.get("/next", response_model=RotationNextOut | None)
 def next_in_queue(
     batch_id: int | None = Query(default=None),
+    after_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
 ) -> RotationNextOut | None:
-    return _next_pending(db, batch_id)
+    return _next_pending(db, batch_id, after_id)
 
 
 @router.get("/queue-count", response_model=QueueCountOut)
@@ -120,4 +125,9 @@ def confirm(
 
     enqueue_task(hash_crop, crop_id)
 
-    return _next_pending(db, batch_id)
+    # Note: intentionally global (no batch_id filter), matching the
+    # unscoped /next endpoint the review page actually polls. Scoping this
+    # to the just-confirmed crop's own batch made the queue report "empty"
+    # as soon as one batch was finished, even while other batches still had
+    # cards waiting on rotation review.
+    return _next_pending(db, None)

@@ -33,6 +33,28 @@ class Settings(BaseSettings):
     crop_padding_min_pixels: int = 10
     scan_background_threshold: int = 8
 
+    # Already-cropped input detection (spec Section 6.2 addendum). Some
+    # intake sources (e.g. a scanner that auto-crops on-device) hand us
+    # images that are already tight to the card/sleeve, with little or no
+    # near-black scan bed left around them. Contour-detecting against a
+    # background that isn't really there just finds the frame itself, which
+    # (a) can't be cropped any further and (b) has no business being graded
+    # against the raw-scan aspect-ratio tolerance below. We detect that case
+    # by checking how much of the image's own border is background-colored:
+    # a real raw scan is bordered almost entirely by the near-black bed, an
+    # already-cropped image mostly isn't. This is the "tolerance" for that
+    # detection -- the max fraction of background pixels still allowed
+    # around the border before we trust it's a raw, uncropped scan.
+    precropped_perimeter_bg_max_fraction: float = 0.8
+    # Aspect-ratio tolerance applied instead of aspect_ratio_tolerance when
+    # an image is judged already-cropped. We didn't do the cropping, so we
+    # can't correct it -- only sanity-check it. Pre-cropped sources commonly
+    # include a bit of toploader/sleeve margin (or a slightly loose device
+    # crop), which pushes the measured ratio further from the bare-card
+    # ideal than our own contour-based crops ever would. Wider than
+    # aspect_ratio_tolerance on purpose; tune empirically, see spec Section 11.
+    precropped_aspect_ratio_tolerance: float = 0.35
+
     # Duplicate detection (tune empirically, see spec Section 11)
     structural_hash_max_distance: int = 10  # out of 64 bits (pHash)
     color_sig_max_distance: float = 0.2  # normalized histogram distance, 0=identical

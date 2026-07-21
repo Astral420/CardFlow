@@ -1,18 +1,17 @@
 import type { ReactNode } from "react";
-import { Card } from "@/components/ui/card";
+import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 type Accent = "lavender" | "blue" | "peach" | "mint" | "rose";
 
-// Explicit class map — Tailwind's compiler can only pick up statically
-// written class names, so string-templating `bg-accent-${accent}` would
-// silently produce no styles at build time.
-const ACCENT_CLASSES: Record<Accent, string> = {
-  lavender: "bg-accent-lavender text-accent-lavender-foreground",
-  blue: "bg-accent-blue text-accent-blue-foreground",
-  peach: "bg-accent-peach text-accent-peach-foreground",
-  mint: "bg-accent-mint text-accent-mint-foreground",
-  rose: "bg-accent-rose text-accent-rose-foreground",
+// Icon color per accent — bare, no container, top-right placement.
+// mint maps to the system-status green; others use muted.
+const ICON_COLOR: Record<Accent, string> = {
+  lavender: "text-muted-foreground",
+  blue:     "text-muted-foreground",
+  peach:    "text-muted-foreground",
+  mint:     "text-accent-mint-solid",
+  rose:     "text-muted-foreground",
 };
 
 export function StatCard({
@@ -31,22 +30,23 @@ export function StatCard({
   className?: string;
 }) {
   return (
-    <Card className={cn("flex items-center gap-4 p-4", className)}>
-      {icon && (
-        <div
-          className={cn(
-            "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
-            ACCENT_CLASSES[accent]
-          )}
-        >
-          {icon}
-        </div>
-      )}
-      <div className="min-w-0">
+    <Card className={cn("flex flex-col", className)}>
+      <CardHeader>
         <p className="text-caption text-muted-foreground">{label}</p>
-        <p className="text-page-title leading-tight text-primary">{value}</p>
-        {hint && <p className="mt-0.5 text-caption text-muted-foreground">{hint}</p>}
-      </div>
+        {icon && (
+          <span className={cn("h-4 w-4 shrink-0", ICON_COLOR[accent])}>
+            {icon}
+          </span>
+        )}
+      </CardHeader>
+      <CardContent className="pt-2 pb-4">
+        <p className="text-3xl font-bold leading-tight tracking-tight text-primary">
+          {value}
+        </p>
+        {hint && (
+          <p className="mt-1 text-caption text-muted-foreground">{hint}</p>
+        )}
+      </CardContent>
     </Card>
   );
 }

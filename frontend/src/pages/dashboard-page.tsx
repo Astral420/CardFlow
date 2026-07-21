@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { RotateCw, Copy, Upload, ArrowRight, Layers, CheckCircle2, Clock } from 'lucide-react'
+import { RotateCw, Copy, Upload, ArrowRight, Layers, CheckCircle2, Clock, ChevronRight } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { listBatches, getRotationQueueCount, getDuplicateQueueCount } from '@/lib/api'
 import { StatCard } from '@/components/shared/stat-card'
@@ -97,28 +97,28 @@ export function DashboardPage() {
           <StatCard
             label="Rotation Queue"
             value={rotQ}
-            icon={<RotateCw className="h-4.5 w-4.5" />}
+            icon={<RotateCw className="h-4 w-4" />}
             accent="lavender"
             hint={rotQ > 0 ? 'Cards awaiting review' : 'All clear'}
           />
           <StatCard
             label="Duplicate Queue"
             value={dupQ}
-            icon={<Copy className="h-4.5 w-4.5" />}
+            icon={<Copy className="h-4 w-4" />}
             accent="peach"
             hint={dupQ > 0 ? 'Pairs awaiting decision' : 'All clear'}
           />
           <StatCard
             label="Total Batches"
             value={batches?.length ?? '—'}
-            icon={<Layers className="h-4.5 w-4.5" />}
+            icon={<Layers className="h-4 w-4" />}
             accent="blue"
             hint="Recent 5 shown"
           />
           <StatCard
             label="System"
             value="Operational"
-            icon={<CheckCircle2 className="h-4.5 w-4.5" />}
+            icon={<CheckCircle2 className="h-4 w-4" />}
             accent="mint"
           />
         </div>
@@ -130,51 +130,42 @@ export function DashboardPage() {
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
           <Link to="/rotation-review">
             <Card className={cn(
-              'group cursor-pointer p-4 transition-colors duration-150 hover:bg-muted/30',
+              'group cursor-pointer p-4 transition-all duration-150 hover:border-border/80 hover:shadow-float',
               rotQ > 0 && 'ring-1 ring-accent-lavender-solid/40'
             )}>
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-lavender text-accent-lavender-foreground">
-                  <RotateCw className="h-4.5 w-4.5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-body font-semibold text-primary">Rotation Review</p>
-                  <p className="text-caption text-muted-foreground">
-                    {rotQ > 0 ? `${rotQ} card${rotQ === 1 ? '' : 's'} waiting` : 'Queue empty'}
-                  </p>
-                </div>
+              <div className="flex items-center gap-2">
+                <RotateCw className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <p className="flex-1 text-body font-semibold text-primary">Rotation Review</p>
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground opacity-40 transition-opacity group-hover:opacity-100" />
               </div>
+              <p className="mt-1.5 text-caption text-muted-foreground">
+                {rotQ > 0 ? `${rotQ} card${rotQ === 1 ? '' : 's'} waiting` : 'Queue empty'}
+              </p>
             </Card>
           </Link>
           <Link to="/duplicate-review">
             <Card className={cn(
-              'group cursor-pointer p-4 transition-colors duration-150 hover:bg-muted/30',
+              'group cursor-pointer p-4 transition-all duration-150 hover:border-border/80 hover:shadow-float',
               dupQ > 0 && 'ring-1 ring-accent-peach-solid/40'
             )}>
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-peach text-accent-peach-foreground">
-                  <Copy className="h-4.5 w-4.5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-body font-semibold text-primary">Duplicate Review</p>
-                  <p className="text-caption text-muted-foreground">
-                    {dupQ > 0 ? `${dupQ} pair${dupQ === 1 ? '' : 's'} waiting` : 'Queue empty'}
-                  </p>
-                </div>
+              <div className="flex items-center gap-2">
+                <Copy className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <p className="flex-1 text-body font-semibold text-primary">Duplicate Review</p>
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground opacity-40 transition-opacity group-hover:opacity-100" />
               </div>
+              <p className="mt-1.5 text-caption text-muted-foreground">
+                {dupQ > 0 ? `${dupQ} pair${dupQ === 1 ? '' : 's'} waiting` : 'Queue empty'}
+              </p>
             </Card>
           </Link>
           <Link to="/batches">
-            <Card className="group cursor-pointer p-4 transition-colors duration-150 hover:bg-muted/30">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-blue text-accent-blue-foreground">
-                  <Layers className="h-4.5 w-4.5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-body font-semibold text-primary">Manage Batches</p>
-                  <p className="text-caption text-muted-foreground">Upload &amp; view batches</p>
-                </div>
+            <Card className="group cursor-pointer p-4 transition-all duration-150 hover:border-border/80 hover:shadow-float">
+              <div className="flex items-center gap-2">
+                <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <p className="flex-1 text-body font-semibold text-primary">Manage Batches</p>
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground opacity-40 transition-opacity group-hover:opacity-100" />
               </div>
+              <p className="mt-1.5 text-caption text-muted-foreground">Upload &amp; view batches</p>
             </Card>
           </Link>
         </div>

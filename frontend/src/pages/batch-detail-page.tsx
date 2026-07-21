@@ -1,10 +1,9 @@
-import { useState, useRef, useEffect } from 'react'
-import { createPortal } from 'react-dom'
+import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, ImageOff, Maximize2, ExternalLink, Download, AlertTriangle,
-  Loader2, Images, Copy, CheckCircle2, ArrowRight, ZoomIn, ZoomOut, X,
+  Loader2, Images, Copy, CheckCircle2, ArrowRight,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -20,32 +19,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import { RotatedImage, FullscreenLightbox } from '@/components/shared/image-lightbox'
 import type { BatchDuplicatePair, RawScan } from '@/lib/types'
-
-// --- Shared helpers ---
-
-function RotatedImage({
-  src,
-  alt,
-  rotationDegrees,
-  className = '',
-}: {
-  src: string
-  alt: string
-  rotationDegrees: number
-  className?: string
-}) {
-  return (
-    <div className={`overflow-hidden flex items-center justify-center bg-muted ${className}`}>
-      <img
-        src={src}
-        alt={alt}
-        className="h-full w-full object-contain"
-        style={{ transform: rotationDegrees ? `rotate(${rotationDegrees}deg)` : undefined }}
-      />
-    </div>
-  )
-}
 
 // --- All-Scans tab ---
 
@@ -86,22 +61,16 @@ function ScanThumbnail({ scan, onClick }: { scan: RawScan; onClick: () => void }
       </div>
 
       {/* Side chip — top-right */}
-      <div className="absolute right-2 top-2">
-        <span
-          className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold leading-none shadow-sm backdrop-blur-sm ${
-            scan.side === 'front'
-              ? 'bg-accent-blue/90 text-accent-blue-foreground'
-              : 'bg-muted/90 text-muted-foreground'
-          }`}
-        >
+      <div className="absolute right-3 top-3 pointer-events-none select-none">
+        <span className="inline-flex items-center rounded-md bg-slate-950/80 px-2 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-wider leading-none text-slate-200 backdrop-blur-md border border-slate-700/60 shadow-md">
           {scan.side}
         </span>
       </div>
 
       {/* Duplicate chip — top-left */}
       {scan.is_duplicate && (
-        <div className="absolute left-2 top-2">
-          <span className="inline-flex items-center rounded-md bg-accent-rose/90 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-accent-rose-foreground shadow-sm backdrop-blur-sm">
+        <div className="absolute left-3 top-3 pointer-events-none select-none">
+          <span className="inline-flex items-center rounded-md bg-slate-950/80 px-2 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-wider leading-none text-accent-rose-solid backdrop-blur-md border border-slate-700/60 shadow-md">
             Dup
           </span>
         </div>
@@ -110,86 +79,6 @@ function ScanThumbnail({ scan, onClick }: { scan: RawScan; onClick: () => void }
   )
 }
 
-
-function FullscreenLightbox({
-  isOpen,
-  onClose,
-  src,
-  alt,
-  rotationDegrees,
-}: {
-  isOpen: boolean
-  onClose: () => void
-  src: string
-  alt: string
-  rotationDegrees: number
-}) {
-  const [scale, setScale] = useState(1)
-  const containerRef = useRef<HTMLDivElement>(null)
-
-  // Reset scale when opened
-  useEffect(() => {
-    if (isOpen) setScale(1)
-  }, [isOpen])
-
-  if (typeof document === 'undefined') return null
-
-  return createPortal(
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[100] flex flex-col bg-black/95 backdrop-blur-sm pointer-events-auto"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="absolute right-4 top-4 z-10">
-            <button 
-              onClick={onClose} 
-              className="rounded-full p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-            >
-              <X className="h-6 w-6" />
-            </button>
-          </div>
-          <div ref={containerRef} className="relative flex flex-1 items-center justify-center overflow-hidden">
-            <motion.img
-              src={src}
-              alt={alt}
-              drag
-              dragConstraints={containerRef}
-              dragElastic={0.2}
-              className="max-h-[85vh] max-w-[90vw] cursor-grab object-contain active:cursor-grabbing"
-              animate={{ scale, rotate: rotationDegrees || 0 }}
-              transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            />
-            <div className="absolute bottom-8 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-xl bg-white/10 p-2 backdrop-blur-md">
-              <button 
-                onClick={() => setScale(s => Math.max(0.5, s - 0.5))}
-                className="rounded-lg p-2 text-white transition-colors hover:bg-white/20 disabled:opacity-50"
-                disabled={scale <= 0.5}
-              >
-                <ZoomOut className="h-5 w-5" />
-              </button>
-              <span className="w-12 text-center text-xs font-semibold text-white">
-                {Math.round(scale * 100)}%
-              </span>
-              <button 
-                onClick={() => setScale(s => Math.min(4, s + 0.5))}
-                className="rounded-lg p-2 text-white transition-colors hover:bg-white/20 disabled:opacity-50"
-                disabled={scale >= 4}
-              >
-                <ZoomIn className="h-5 w-5" />
-              </button>
-            </div>
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>,
-    document.body
-  )
-}
 
 function InspectorDrawer({ scan, onClose }: { scan: RawScan; onClose: () => void }) {
   const [isLightboxOpen, setIsLightboxOpen] = useState(false)
@@ -256,7 +145,7 @@ function InspectorDrawer({ scan, onClose }: { scan: RawScan; onClose: () => void
             {/* Side */}
             <div className="flex items-center justify-between px-3.5 py-2.5">
               <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Side</span>
-              <Badge variant={scan.side === 'front' ? 'blue' : 'neutral'}>{scan.side}</Badge>
+              <span className="text-body font-medium text-primary capitalize">{scan.side}</span>
             </div>
 
             {/* Duplicate flag — only if flagged */}

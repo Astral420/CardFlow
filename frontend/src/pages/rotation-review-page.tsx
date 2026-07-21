@@ -1,6 +1,6 @@
 import { useCallback, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { RotateCw, CheckCircle, SkipForward, ImageOff } from 'lucide-react'
+import { RotateCw, CheckCircle2, SkipForward, ImageOff } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import {
@@ -145,7 +145,22 @@ export function RotationReviewPage() {
 
   const skipMutation = useMutation({
     mutationFn: async () => {
-      queryClient.invalidateQueries({ queryKey: ['rotation-next'] })
+      // Move past whichever side(s) of the current pair are still pending,
+      // without confirming them. Using the highest crop_id in the pair as
+      // the cursor guarantees the next fetch returns a genuinely different
+      // pending item rather than the same one we're already looking at.
+      const anchor = Math.max(
+        current?.front?.crop_id ?? 0,
+        current?.back?.crop_id ?? 0
+      )
+      if (!anchor) return null
+      return getNextRotation(undefined, anchor)
+    },
+    onSuccess: (next) => {
+      queryClient.setQueryData(['rotation-next'], next)
+    },
+    onError: () => {
+      toast({ title: 'Skip failed', variant: 'error' })
     },
   })
 
@@ -206,9 +221,7 @@ export function RotationReviewPage() {
       ) : isEmpty ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="flex flex-col items-center gap-4 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-accent-mint text-accent-mint-foreground">
-              <CheckCircle className="h-8 w-8" />
-            </div>
+            <CheckCircle2 className="h-8 w-8 text-accent-mint-solid" />
             <div>
               <p className="text-section text-primary">Queue is empty</p>
               <p className="mt-1 text-body text-muted-foreground">

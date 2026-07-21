@@ -66,10 +66,10 @@ function CardThumb({ card, onClick }: { card: CardCrop; onClick: () => void }) {
       <div className="absolute bottom-0 left-0 right-0 translate-y-2 bg-gradient-to-t from-primary/90 to-transparent p-3 opacity-0 transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100">
         <p className="truncate text-[10px] font-medium text-white">{card.original_filename}</p>
       </div>
-      <div className="absolute right-1.5 top-1.5">
-        <Badge variant={card.side === 'front' ? 'blue' : 'neutral'} className="text-[10px]">
+      <div className="absolute right-3 top-3 pointer-events-none select-none">
+        <span className="inline-flex items-center rounded-md bg-slate-950/80 px-2 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-wider leading-none text-slate-200 backdrop-blur-md border border-slate-700/60 shadow-md">
           {card.side}
-        </Badge>
+        </span>
       </div>
     </motion.div>
   )
@@ -139,7 +139,7 @@ function CardDetailDrawer({ cropId, onClose }: { cropId: number; onClose: () => 
               {/* Side */}
               <div className="flex items-center justify-between px-3.5 py-2.5">
                 <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Side</span>
-                <Badge variant={detail.side === 'front' ? 'blue' : 'neutral'}>{detail.side}</Badge>
+                <span className="text-body font-medium text-primary capitalize">{detail.side}</span>
               </div>
 
               {/* Batch */}

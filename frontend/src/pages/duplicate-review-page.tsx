@@ -1,6 +1,6 @@
-import { useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, X, SkipForward, ImageOff, AlertTriangle } from 'lucide-react'
+import { CheckCircle2, X, SkipForward, ImageOff, AlertTriangle, Maximize2 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import {
@@ -16,6 +16,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/toast'
 import { PageHeader } from '@/components/shared/page-header'
 import { SectionLabel } from '@/components/shared/section-label'
+import { RotatedImage, FullscreenLightbox } from '@/components/shared/image-lightbox'
 import type { CardPair, CropQueueItem } from '@/lib/types'
 
 function SimilarityBar({ label, value }: { label: string; value: number | null }) {
@@ -53,6 +54,7 @@ function SidePreview({
   side: 'front' | 'back'
   matchedCropId: number | null
 }) {
+  const [isLightboxOpen, setIsLightboxOpen] = useState(false)
   const isMatched = crop?.crop_id === matchedCropId
 
   return (
@@ -73,11 +75,26 @@ function SidePreview({
       </div>
       <div className="flex h-56 items-center justify-center bg-muted p-2">
         {crop?.image_url ? (
-          <img
-            src={crop.image_url}
-            alt={crop.original_filename}
-            className="h-full w-full object-contain"
-          />
+          <button
+            type="button"
+            onClick={() => setIsLightboxOpen(true)}
+            className="group relative h-full w-full overflow-hidden rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border"
+            aria-label="Open full image"
+          >
+            <RotatedImage
+              src={crop.image_url}
+              alt={crop.original_filename}
+              rotationDegrees={crop.rotation_degrees}
+              className="h-full w-full"
+            />
+            {/* Zoom hover overlay */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-primary/0 opacity-0 transition-all duration-200 group-hover:bg-primary/40 group-hover:opacity-100">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-surface/90 shadow-float backdrop-blur-sm">
+                <Maximize2 className="h-4 w-4 text-primary" />
+              </div>
+              <span className="text-[10px] font-semibold text-white drop-shadow">Expand</span>
+            </div>
+          </button>
         ) : (
           <div className="flex h-full w-full items-center justify-center">
             <ImageOff className="h-10 w-10 text-muted-foreground/30" />
@@ -89,6 +106,16 @@ function SidePreview({
           {crop?.original_filename ?? `${side} not found`}
         </p>
       </div>
+
+      {crop?.image_url && (
+        <FullscreenLightbox
+          isOpen={isLightboxOpen}
+          onClose={() => setIsLightboxOpen(false)}
+          src={crop.image_url}
+          alt={crop.original_filename}
+          rotationDegrees={crop.rotation_degrees}
+        />
+      )}
     </div>
   )
 }
@@ -227,9 +254,7 @@ export function DuplicateReviewPage() {
       ) : isEmpty ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="flex flex-col items-center gap-4 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-accent-mint text-accent-mint-foreground">
-              <CheckCircle2 className="h-8 w-8" />
-            </div>
+            <CheckCircle2 className="h-8 w-8 text-accent-mint-solid" />
             <div>
               <p className="text-section text-primary">Queue is empty</p>
               <p className="mt-1 text-body text-muted-foreground">

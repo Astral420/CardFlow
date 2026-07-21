@@ -123,9 +123,12 @@ export async function exportBatchZip(batchId: number, filename: string) {
 
 // ---- Rotation review ----
 
-export async function getNextRotation(batchId?: number) {
+export async function getNextRotation(batchId?: number, afterId?: number) {
+  const params: Record<string, number> = {};
+  if (batchId) params.batch_id = batchId;
+  if (afterId) params.after_id = afterId;
   const { data } = await client.get<RotationNext | null>("/review/rotation/next", {
-    params: batchId ? { batch_id: batchId } : undefined,
+    params: Object.keys(params).length ? params : undefined,
   });
   return data;
 }
