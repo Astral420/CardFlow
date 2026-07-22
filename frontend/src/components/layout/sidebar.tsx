@@ -142,43 +142,53 @@ export function Sidebar() {
         className={cn(
           "flex border-b border-border transition-all duration-200",
           collapsed
-            ? "flex-col items-center gap-2 px-2 py-3"
-            : "flex-row items-center px-3 py-4"
+            ? "items-center justify-center px-2 py-3.5"
+            : "items-center justify-between px-3.5 py-4"
         )}
       >
-        {/* Logo */}
-        <img
-          src="/favicon.png"
-          alt="CardFlow Logo"
-          className="h-8 w-8 shrink-0 rounded-md object-contain"
-        />
+        {collapsed ? (
+          /* Collapsed mode: logo centered; hovering reveals ChevronRight */
+          <button
+            id="sidebar-expand-toggle"
+            onClick={toggle}
+            title="Expand sidebar"
+            className="group relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors duration-150 hover:bg-muted"
+          >
+            <img
+              src="/favicon.png"
+              alt="CardFlow Logo"
+              className="h-8 w-8 rounded-md object-contain transition-opacity duration-150 group-hover:opacity-0"
+            />
+            <ChevronLeft
+              className="absolute inset-0 m-auto h-4 w-4 rotate-180 text-primary opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+              strokeWidth={2.5}
+            />
+          </button>
+        ) : (
+          /* Expanded mode: Logo + Text on left, ChevronLeft on right */
+          <>
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+              <img
+                src="/favicon.png"
+                alt="CardFlow Logo"
+                className="h-8 w-8 shrink-0 rounded-md object-contain"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-card-title leading-tight text-primary">CardFlow</p>
+                <p className="truncate text-caption text-muted-foreground">Processing pipeline</p>
+              </div>
+            </div>
 
-        {/* Wordmark — only visible when expanded */}
-        {!collapsed && (
-          <div className="ml-2.5 min-w-0 flex-1">
-            <p className="truncate text-card-title leading-tight text-primary">CardFlow</p>
-            <p className="truncate text-caption text-muted-foreground">Processing pipeline</p>
-          </div>
+            <button
+              id="sidebar-collapse-toggle"
+              onClick={toggle}
+              title="Collapse sidebar"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-primary"
+            >
+              <ChevronLeft className="h-4 w-4 shrink-0" strokeWidth={2.5} />
+            </button>
+          </>
         )}
-
-        {/* Collapse toggle — always inside the sidebar */}
-        <button
-          id="sidebar-collapse-toggle"
-          onClick={toggle}
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className={cn(
-            "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-primary",
-            !collapsed && "ml-auto"
-          )}
-        >
-          <ChevronLeft
-            className={cn(
-              "h-3.5 w-3.5 transition-transform duration-200",
-              collapsed && "rotate-180"
-            )}
-            strokeWidth={2.5}
-          />
-        </button>
       </div>
 
       {/* ── Nav ────────────────────────────────────────────────────────────── */}
