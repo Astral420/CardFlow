@@ -4,6 +4,9 @@ import type { Config } from "tailwindcss";
 // Palette: soft neutral grayscale + status-only accents (Linear/Attio/Vercel-inspired).
 // Spacing follows an 8px rhythm; radii and shadows are intentionally restrained
 // so borders — not elevation — carry visual hierarchy.
+//
+// Colors are driven by CSS variables defined in index.css so that dark mode
+// works by toggling the `.dark` class on <html> — no `dark:` prefixes needed.
 export default {
   darkMode: "class",
   content: ["./index.html", "./**/*.{ts,tsx}"],
@@ -21,36 +24,40 @@ export default {
         ],
       },
       colors: {
-        background: "#F5F4FB",
-        surface: "#FDFCFF",
-        border: "#E5E3F5",
+        background: "var(--color-background)",
+        surface: "var(--color-surface)",
+        border: "var(--color-border)",
 
-        primary: "#1A1730",
-        "primary-foreground": "#FFFFFF",
-        "muted-foreground": "#6B6887",
-        muted: "#EEECF8",
+        primary: "var(--color-primary)",
+        "primary-foreground": "var(--color-primary-foreground)",
+        "muted-foreground": "var(--color-muted-foreground)",
+        muted: "var(--color-muted)",
 
-        // Status-only accents. Never decorative — each pair communicates
-        // one operational state (processing / info / warning / success / error).
-        "accent-lavender": "#EEEEFC",
-        "accent-lavender-foreground": "#5457C6",
-        "accent-lavender-solid": "#6366F1",
+        // Dedicated token for primary action buttons (avoids conflation with
+        // the primary text colour which changes meaning in dark mode).
+        interactive: "var(--color-interactive)",
+        "interactive-text": "var(--color-interactive-text)",
 
-        "accent-blue": "#EAF1FE",
-        "accent-blue-foreground": "#2A63C7",
-        "accent-blue-solid": "#3B82F6",
+        // Status-only accents — each pair communicates one operational state.
+        "accent-lavender": "var(--color-accent-lavender)",
+        "accent-lavender-foreground": "var(--color-accent-lavender-foreground)",
+        "accent-lavender-solid": "var(--color-accent-lavender-solid)",
 
-        "accent-peach": "#FCF1E4",
-        "accent-peach-foreground": "#B4702E",
-        "accent-peach-solid": "#F0973D",
+        "accent-blue": "var(--color-accent-blue)",
+        "accent-blue-foreground": "var(--color-accent-blue-foreground)",
+        "accent-blue-solid": "var(--color-accent-blue-solid)",
 
-        "accent-mint": "#E8F6EE",
-        "accent-mint-foreground": "#227A4C",
-        "accent-mint-solid": "#22C55E",
+        "accent-peach": "var(--color-accent-peach)",
+        "accent-peach-foreground": "var(--color-accent-peach-foreground)",
+        "accent-peach-solid": "var(--color-accent-peach-solid)",
 
-        "accent-rose": "#FBEAEA",
-        "accent-rose-foreground": "#BE3B3B",
-        "accent-rose-solid": "#EF4444",
+        "accent-mint": "var(--color-accent-mint)",
+        "accent-mint-foreground": "var(--color-accent-mint-foreground)",
+        "accent-mint-solid": "var(--color-accent-mint-solid)",
+
+        "accent-rose": "var(--color-accent-rose)",
+        "accent-rose-foreground": "var(--color-accent-rose-foreground)",
+        "accent-rose-solid": "var(--color-accent-rose-solid)",
       },
       borderRadius: {
         // Cards/panels: 12px. Buttons/inputs/pills: 10px. Keep existing

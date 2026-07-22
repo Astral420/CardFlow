@@ -583,7 +583,7 @@ export function BatchDetailPage() {
                 </span>
               )}
               {activeTab === tab.id && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-primary" />
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-accent-lavender-solid" />
               )}
             </button>
           ))}

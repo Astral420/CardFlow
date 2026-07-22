@@ -308,7 +308,7 @@ export function RotationReviewPage() {
             disabled={confirmMutation.isPending || rotateMutation.isPending}
             className="gap-2 min-w-[190px]"
           >
-            <CheckCircle className="h-4 w-4" />
+            <CheckCircle2 className="h-4 w-4" />
             {confirmMutation.isPending ? 'Confirming...' : 'Confirm next pending'}
             <ShortcutHint keys={['Space']} label="" className="ml-1" />
           </Button>
