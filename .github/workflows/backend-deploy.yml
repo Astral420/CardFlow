@@ -39,6 +39,7 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: Install cloudflared (pin the version — see §4's changelog warning)
         run: |
