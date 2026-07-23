@@ -1,5 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_INSECURE_DEFAULT = "change-me"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -8,7 +10,9 @@ class Settings(BaseSettings):
         "postgresql+psycopg2://card_tool:card_tool@localhost:5432/card_tool"
     )
     redis_url: str = "redis://localhost:6379/0"
-    redis_url1: str = "redis://localhost:6379/1"
+    # Celery result backend (separate DB index from the broker above so
+    # results don't collide with queued task messages).
+    redis_result_backend_url: str = "redis://localhost:6379/1"
 
     r2_account_id: str = ""
     r2_access_key_id: str = ""
@@ -17,12 +21,23 @@ class Settings(BaseSettings):
     r2_public_base_url: str = ""
     r2_endpoint_url: str = ""  # override for local dev/testing (e.g. MinIO)
 
-    secret_key: str = "change-me"
+    secret_key: str = _INSECURE_DEFAULT
     jwt_algorithm: str = "HS256"
     jwt_expires_minutes: int = 60 * 24 * 14  # 2 weeks — two known users, low risk
-    app_passcode: str = "change-me"
+    app_passcode: str = _INSECURE_DEFAULT
 
     cors_origins: list[str] = ["http://localhost:5173"]
+
+    def insecure_defaults(self) -> list[str]:
+        """Names of settings still at their placeholder value. Used to fail
+        loudly on startup instead of silently running with a guessable JWT
+        signing key / login passcode (see app.main's startup check)."""
+        insecure = []
+        if self.secret_key == _INSECURE_DEFAULT:
+            insecure.append("SECRET_KEY")
+        if self.app_passcode == _INSECURE_DEFAULT:
+            insecure.append("APP_PASSCODE")
+        return insecure
 
     # Crop pipeline
     crop_output_width: int = 750

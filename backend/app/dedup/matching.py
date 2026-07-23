@@ -12,7 +12,7 @@ import math
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.dedup.bktree import BKTree
+from app.dedup import tree_cache
 from app.models import CardCrop, DuplicateCandidate, DuplicateStatus, RawScan
 from app.naming import pairing_key
 from app.vision.hashing import ROTATIONS, color_distance, hash_distance
@@ -99,37 +99,36 @@ def find_cross_batch_duplicates(
     db: Session, crop: CardCrop, batch_id: int
 ) -> list[DuplicateHit]:
     """BK-tree shortlist over structural hashes from other batches, then the
-    more expensive color check only on that shortlist."""
+    more expensive color check only on that shortlist.
+
+    The tree itself is a process-local cache (see app.dedup.tree_cache) that
+    gets incrementally caught up rather than rebuilt from every historical
+    crop on every call.
+    """
     query_hash, query_color = crop.hash_0, crop.color_sig_0
     if query_hash is None or query_color is None:
         return []
 
-    others = (
-        db.query(CardCrop)
-        .join(RawScan)
-        .filter(RawScan.batch_id != batch_id, CardCrop.hash_0.isnot(None))
-        .all()
-    )
-    if not others:
-        return []
-
-    tree: BKTree[int] = BKTree(hash_distance)
-    for other in others:
-        for rotation in ROTATIONS:
-            hash_value = _hash_columns(other)[rotation]
-            if hash_value is not None:
-                tree.add(hash_value, other.id)
-
+    tree = tree_cache.get_tree(db)
     candidate_ids = {
         other_id
         for other_id, _dist in tree.query(
             query_hash, settings.structural_hash_max_distance
         )
+        if other_id != crop.id
     }
     if not candidate_ids:
         return []
 
-    candidates = db.query(CardCrop).filter(CardCrop.id.in_(candidate_ids)).all()
+    # The tree is global across all batches (that's what makes the
+    # incremental catch-up possible); re-apply the "other batches only"
+    # filter here against just the shortlist, not the full history.
+    candidates = (
+        db.query(CardCrop)
+        .join(RawScan)
+        .filter(CardCrop.id.in_(candidate_ids), RawScan.batch_id != batch_id)
+        .all()
+    )
     hits = []
     for candidate in candidates:
         hit = _best_match(query_hash, query_color, candidate)

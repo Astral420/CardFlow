@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.common import crop_item
+from app.api.common import crop_item, find_sibling_crop
 from app.api.deps import get_current_user
 from app.batch_status import refresh_batch_status
 from app.db import get_db
@@ -14,20 +14,6 @@ from app.tasks.dispatch import enqueue_task
 from app.tasks.hashing import hash_crop
 
 router = APIRouter(prefix="/api/review/rotation", tags=["rotation-review"])
-
-
-def _find_sibling(db: Session, raw_scan: RawScan) -> CardCrop | None:
-    key = pairing_key(raw_scan.original_filename)
-    candidates = (
-        db.query(CardCrop)
-        .join(RawScan)
-        .filter(RawScan.batch_id == raw_scan.batch_id, RawScan.id != raw_scan.id)
-        .all()
-    )
-    return next(
-        (c for c in candidates if pairing_key(c.raw_scan.original_filename) == key),
-        None,
-    )
 
 
 def _next_pending(
@@ -52,7 +38,7 @@ def _next_pending(
         return None
 
     raw_scan = crop.raw_scan
-    sibling = _find_sibling(db, raw_scan)
+    sibling = find_sibling_crop(db, crop)
 
     front = crop if raw_scan.side == ScanSide.front else sibling
     back = crop if raw_scan.side == ScanSide.back else sibling

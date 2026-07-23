@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -6,7 +8,23 @@ from app.api import auth, batches, cards, duplicates, rotation
 
 from app.config import settings
 
-app = FastAPI(title="Card Tool API")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Fail loudly rather than silently accepting logins/issuing JWTs signed
+    # with a secret anyone can read out of this repo's .env.example.
+    insecure = settings.insecure_defaults()
+    if insecure:
+        names = ", ".join(insecure)
+        raise RuntimeError(
+            f"Refusing to start: {names} still set to the default "
+            "placeholder value. Set real value(s) in .env before running "
+            "the API."
+        )
+    yield
+
+
+app = FastAPI(title="Card Tool API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

@@ -22,19 +22,24 @@ class DuplicateCandidate(Base):
     __tablename__ = "duplicate_candidates"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Indexed: record_duplicate_candidates() looks up an existing row by
+    # this pair before inserting, and cards.py filters by either side of it.
     card_crop_id_a: Mapped[int] = mapped_column(
-        ForeignKey("card_crops.id"), nullable=False
+        ForeignKey("card_crops.id"), nullable=False, index=True
     )
     card_crop_id_b: Mapped[int] = mapped_column(
-        ForeignKey("card_crops.id"), nullable=False
+        ForeignKey("card_crops.id"), nullable=False, index=True
     )
     structural_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     color_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     filename_match: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Indexed: batch counts and the duplicate-review queue both filter on
+    # status across every candidate row.
     status: Mapped[DuplicateStatus] = mapped_column(
         Enum(DuplicateStatus, name="duplicate_status"),
         default=DuplicateStatus.pending,
         nullable=False,
+        index=True,
     )
     reviewed_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True

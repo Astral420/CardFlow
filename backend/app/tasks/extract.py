@@ -68,6 +68,13 @@ def _extract_batch(batch_id: int) -> None:
         db.commit()
 
         storage.delete_object(zip_key)
+    except Exception:
+        # A raw_scan row can be flushed (assigned an id) for one zip entry
+        # and then storage.upload_bytes() can fail for a later entry, or the
+        # zip can be malformed partway through -- roll back explicitly
+        # rather than leaving that to close()'s implicit behavior.
+        db.rollback()
+        raise
     finally:
         db.close()
 
