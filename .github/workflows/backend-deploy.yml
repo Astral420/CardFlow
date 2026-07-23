@@ -1,0 +1,115 @@
+name: Backend deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+
+concurrency:
+  group: backend-deploy
+  cancel-in-progress: false
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/cardflow-api:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/cardflow-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install cloudflared (pin the version — see §4's changelog warning)
+        run: |
+          curl -L --output cloudflared.deb \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.5.1/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared.deb
+
+      - name: Write deploy SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Configure tunnel-only SSH
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          cat >> ~/.ssh/config <<EOF
+          Host cardflow-vm
+            HostName ssh.cardflowtool.tech
+            User deploy
+            IdentityFile ~/.ssh/deploy_key
+            ProxyCommand cloudflared access ssh --hostname %h --service-token-id "$CF_ACCESS_CLIENT_ID" --service-token-secret "$CF_ACCESS_CLIENT_SECRET"
+            StrictHostKeyChecking accept-new
+          EOF
+
+      - name: Write environment files
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          APP_SECRET_KEY: ${{ secrets.APP_SECRET_KEY }}
+          APP_PASSCODE: ${{ secrets.APP_PASSCODE }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        run: |
+          cat > /tmp/env.production <<EOF
+          R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
+          R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+          R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+          R2_BUCKET_NAME=card-tool
+          R2_PUBLIC_BASE_URL=https://media.cardflowtool.tech
+          SECRET_KEY=${APP_SECRET_KEY}
+          APP_PASSCODE=${APP_PASSCODE}
+          CORS_ORIGINS=["https://cardflowtool.tech","https://www.cardflowtool.tech"]
+          CORS_ORIGIN_REGEX=^https://cardflow-.*\.vercel\.app\$
+          EOF
+          cat > /tmp/compose.env <<EOF
+          GHCR_OWNER=${{ github.repository_owner }}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          EOF
+          scp -F ~/.ssh/config /tmp/env.production cardflow-vm:~/cardflow/backend/.env.production
+          scp -F ~/.ssh/config /tmp/compose.env cardflow-vm:~/cardflow/.env
+          shred -u /tmp/env.production /tmp/compose.env
+
+      - name: Pull, migrate, restart
+        run: |
+          ssh cardflow-vm '
+            cd ~/cardflow &&
+            export IMAGE_TAG=${{ github.sha }} &&
+            docker compose -f docker-compose.prod.yml pull &&
+            docker compose -f docker-compose.prod.yml run --rm api alembic upgrade head &&
+            docker compose -f docker-compose.prod.yml up -d
+          '
+
+      - name: Health check
+        run: |
+          ssh cardflow-vm '
+            for i in $(seq 1 10); do
+              curl -sf http://localhost:8000/api/health && exit 0
+              sleep 3
+            done
+            echo "health check failed after deploy" && exit 1
+          '
