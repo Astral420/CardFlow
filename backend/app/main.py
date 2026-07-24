@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 import app.celery_app
-from app.api import auth, batches, cards, duplicates, rotation
+from app.api import auth, batches, cards, duplicates, rotation, users
 
 from app.config import settings
 
@@ -35,6 +35,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(users.router)
 app.include_router(batches.router)
 app.include_router(rotation.router)
 app.include_router(duplicates.router)

@@ -17,6 +17,7 @@ import { useToast } from '@/components/ui/toast'
 import { PageHeader } from '@/components/shared/page-header'
 import { SectionLabel } from '@/components/shared/section-label'
 import { RotatedImage, FullscreenLightbox } from '@/components/shared/image-lightbox'
+import { useAuth } from '@/lib/auth'
 import type { CardPair, CropQueueItem } from '@/lib/types'
 
 function SimilarityBar({ label, value }: { label: string; value: number | null }) {
@@ -162,6 +163,7 @@ function CardPairPreview({
 export function DuplicateReviewPage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  const { canEdit } = useAuth()
 
   const { data: current, isLoading } = useQuery({
     queryKey: ['duplicate-next'],
@@ -193,12 +195,12 @@ export function DuplicateReviewPage() {
   })
 
   const handleConfirm = useCallback(() => {
-    if (!decideMutation.isPending && current) decideMutation.mutate('confirmed_duplicate')
-  }, [decideMutation, current])
+    if (canEdit && !decideMutation.isPending && current) decideMutation.mutate('confirmed_duplicate')
+  }, [decideMutation, current, canEdit])
 
   const handleReject = useCallback(() => {
-    if (!decideMutation.isPending && current) decideMutation.mutate('rejected')
-  }, [decideMutation, current])
+    if (canEdit && !decideMutation.isPending && current) decideMutation.mutate('rejected')
+  }, [decideMutation, current, canEdit])
 
   const handleSkip = useCallback(() => {
     skipMutation.mutate()
@@ -338,7 +340,7 @@ export function DuplicateReviewPage() {
             variant="destructive"
             size="md"
             onClick={handleConfirm}
-            disabled={decideMutation.isPending}
+            disabled={!canEdit || decideMutation.isPending}
             className="gap-2 min-w-[180px]"
           >
             <CheckCircle2 className="h-4 w-4" />
@@ -349,7 +351,7 @@ export function DuplicateReviewPage() {
             variant="secondary"
             size="md"
             onClick={handleReject}
-            disabled={decideMutation.isPending}
+            disabled={!canEdit || decideMutation.isPending}
             className="gap-2 min-w-[180px]"
           >
             <X className="h-4 w-4" />

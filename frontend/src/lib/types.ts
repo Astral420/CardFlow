@@ -20,6 +20,12 @@ export interface User {
   id: number;
   name: string;
   role: UserRole;
+  created_at: string;
+}
+
+export interface CreateUserPayload {
+  name: string;
+  password: string;
 }
 
 export interface Batch {

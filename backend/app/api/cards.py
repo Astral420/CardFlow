@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app import storage
 from app.api.common import card_pair, crop_item, finite_float_or_none, find_sibling_crop
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user_optional
 from app.db import get_db
 from app.models import CardCrop, DuplicateCandidate, RawScan, ScanSide, ScanStatus
 from app.schemas import CardCropDetailOut, CardCropOut, DuplicateCandidateOut
@@ -19,7 +19,7 @@ def list_cards(
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(get_current_user_optional),
 ) -> list[CardCropOut]:
     query = db.query(CardCrop).join(RawScan)
     if batch_id is not None:
@@ -50,7 +50,7 @@ def list_cards(
 
 @router.get("/{crop_id}", response_model=CardCropDetailOut)
 def get_card(
-    crop_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user)
+    crop_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user_optional)
 ) -> CardCropDetailOut:
     crop = db.get(CardCrop, crop_id)
     if crop is None:

@@ -5,6 +5,7 @@ import type {
   BatchDuplicatePair,
   CardCrop,
   CardCropDetail,
+  CreateUserPayload,
   CropQueueItem,
   DuplicateCandidate,
   QueueCount,
@@ -50,10 +51,10 @@ export function apiErrorMessage(error: unknown): string {
 
 // ---- Auth ----
 
-export async function login(name: string, passcode: string) {
+export async function login(name: string, password: string) {
   const { data } = await client.post<{ access_token: string; token_type: string }>(
     "/auth/login",
-    { name, passcode }
+    { name, password }
   );
   return data;
 }
@@ -194,4 +195,20 @@ export async function listCards(params: ListCardsParams) {
 export async function getCard(cropId: number) {
   const { data } = await client.get<CardCropDetail>(`/cards/${cropId}`);
   return data;
+}
+
+// ---- User management (Admin only) ----
+
+export async function listUsers() {
+  const { data } = await client.get<User[]>("/users");
+  return data;
+}
+
+export async function createUser(payload: CreateUserPayload) {
+  const { data } = await client.post<User>("/users", payload);
+  return data;
+}
+
+export async function deleteUser(userId: number) {
+  await client.delete(`/users/${userId}`);
 }

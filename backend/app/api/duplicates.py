@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.common import card_pair, crop_item, finite_float_or_none
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user_optional, require_reviewer
 from app.batch_status import refresh_batch_status
 from app.db import get_db
 from app.models import DuplicateCandidate, DuplicateStatus, User
@@ -38,14 +38,14 @@ def _next_pending(db: Session) -> DuplicateCandidateOut | None:
 
 @router.get("/next", response_model=DuplicateCandidateOut | None)
 def next_in_queue(
-    db: Session = Depends(get_db), _user=Depends(get_current_user)
+    db: Session = Depends(get_db), _user=Depends(get_current_user_optional)
 ) -> DuplicateCandidateOut | None:
     return _next_pending(db)
 
 
 @router.get("/queue-count", response_model=QueueCountOut)
 def queue_count(
-    db: Session = Depends(get_db), _user=Depends(get_current_user)
+    db: Session = Depends(get_db), _user=Depends(get_current_user_optional)
 ) -> QueueCountOut:
     count = (
         db.query(DuplicateCandidate)
@@ -60,7 +60,7 @@ def decide(
     candidate_id: int,
     payload: DuplicateDecisionRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_reviewer),
 ) -> DuplicateCandidateOut | None:
     candidate = db.get(DuplicateCandidate, candidate_id)
     if candidate is None:

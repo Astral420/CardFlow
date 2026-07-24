@@ -1,9 +1,7 @@
-import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/lib/auth'
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth()
-  const location = useLocation()
+  const { isLoading } = useAuth()
 
   if (isLoading) {
     return (
@@ -13,9 +11,8 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     )
   }
 
-  if (!isAuthenticated) {
-    return <Navigate to="/login" state={{ from: location.pathname }} replace />
-  }
-
+  // Guests (unauthenticated) can view the dashboard read-only -- individual
+  // pages/components gate mutating controls on useAuth().canEdit instead of
+  // this component blocking navigation outright.
   return <>{children}</>
 }

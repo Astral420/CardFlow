@@ -16,7 +16,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import storage
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user_optional, require_reviewer
 from app.batch_status import refresh_batch_status
 from app.db import get_db
 from app.models import (
@@ -109,7 +109,7 @@ def _natural_sort_key(filename: str, side: str) -> tuple:
 def list_batches(
     limit: int = Query(default=50, le=200),
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(get_current_user_optional),
 ) -> list[Batch]:
     return db.query(Batch).order_by(Batch.created_at.desc()).limit(limit).all()
 
@@ -121,7 +121,7 @@ async def upload_batch(
     file: UploadFile = File(...),
     source_label: str | None = Form(default=None),
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(require_reviewer),
 ) -> BatchCreateResponse:
     if not file.filename or not file.filename.lower().endswith(".zip"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Expected a .zip file")
@@ -192,7 +192,9 @@ def _batch_counts(db: Session, batch_id: int) -> BatchCountsOut:
 
 @router.get("/{batch_id}", response_model=BatchDetailOut)
 def get_batch(
-    batch_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user)
+    batch_id: int,
+    db: Session = Depends(get_db),
+    _user=Depends(get_current_user_optional),
 ) -> BatchDetailOut:
     batch = db.get(Batch, batch_id)
     if batch is None:
@@ -212,7 +214,9 @@ def get_batch(
 
 @router.get("/{batch_id}/scans", response_model=list[RawScanOut])
 def get_batch_scans(
-    batch_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user)
+    batch_id: int,
+    db: Session = Depends(get_db),
+    _user=Depends(get_current_user_optional),
 ) -> list[RawScanOut]:
     scans = (
         db.query(RawScan)
@@ -261,7 +265,7 @@ def get_batch_scans(
 
 @router.post("/{batch_id}/force-advance", response_model=BatchDetailOut)
 def force_advance_batch(
-    batch_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user)
+    batch_id: int, db: Session = Depends(get_db), _user=Depends(require_reviewer)
 ) -> BatchDetailOut:
     """Mark all stuck 'pending' scans as crop_failed and recompute batch status.
 
@@ -302,7 +306,7 @@ def force_advance_batch(
 
 @router.get("/{batch_id}/export")
 def export_batch_zip(
-    batch_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user)
+    batch_id: int, db: Session = Depends(get_db), _user=Depends(require_reviewer)
 ) -> StreamingResponse:
     """Stream a ZIP of all cropped card images for the batch, with rotation applied."""
     batch = db.get(Batch, batch_id)
@@ -413,7 +417,9 @@ def export_batch_zip(
 
 @router.get("/{batch_id}/duplicates", response_model=list[BatchDuplicatePairOut])
 def get_batch_duplicates(
-    batch_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user)
+    batch_id: int,
+    db: Session = Depends(get_db),
+    _user=Depends(get_current_user_optional),
 ) -> list[BatchDuplicatePairOut]:
     """Return all confirmed-duplicate pairs for a batch with image URLs and scores."""
     batch = db.get(Batch, batch_id)

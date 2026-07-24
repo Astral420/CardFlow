@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.common import crop_item, find_sibling_crop
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user_optional, require_reviewer
 from app.batch_status import refresh_batch_status
 from app.db import get_db
 from app.models import CardCrop, RawScan, ScanSide, ScanStatus
@@ -56,14 +56,14 @@ def next_in_queue(
     batch_id: int | None = Query(default=None),
     after_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(get_current_user_optional),
 ) -> RotationNextOut | None:
     return _next_pending(db, batch_id, after_id)
 
 
 @router.get("/queue-count", response_model=QueueCountOut)
 def queue_count(
-    db: Session = Depends(get_db), _user=Depends(get_current_user)
+    db: Session = Depends(get_db), _user=Depends(get_current_user_optional)
 ) -> QueueCountOut:
     count = (
         db.query(CardCrop)
@@ -82,7 +82,7 @@ def rotate(
     crop_id: int,
     payload: RotateRequest,
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(require_reviewer),
 ) -> CropQueueItemOut:
     crop = db.get(CardCrop, crop_id)
     if crop is None:
@@ -98,7 +98,7 @@ def rotate(
 def confirm(
     crop_id: int,
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(require_reviewer),
 ) -> RotationNextOut | None:
     crop = db.get(CardCrop, crop_id)
     if crop is None:

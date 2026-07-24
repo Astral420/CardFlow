@@ -10,7 +10,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [name, setName] = useState("");
-  const [passcode, setPasscode] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -21,7 +21,7 @@ export function LoginPage() {
     setError(null);
     setIsSubmitting(true);
     try {
-      await login(name, passcode);
+      await login(name, password);
       navigate(from, { replace: true });
     } catch (err) {
       setError(apiErrorMessage(err));
@@ -62,15 +62,15 @@ export function LoginPage() {
             />
           </div>
           <div className="space-y-1.5">
-            <label className="text-caption font-medium text-muted-foreground" htmlFor="passcode">
-              Passcode
+            <label className="text-caption font-medium text-muted-foreground" htmlFor="password">
+              Password
             </label>
             <Input
-              id="passcode"
+              id="password"
               type="password"
-              value={passcode}
-              onChange={(e) => setPasscode(e.target.value)}
-              placeholder="Shared app passcode"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Your password or the shared app passcode"
               autoComplete="current-password"
             />
           </div>

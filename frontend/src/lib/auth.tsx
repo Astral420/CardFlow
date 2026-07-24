@@ -13,7 +13,11 @@ interface AuthContextValue {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (name: string, passcode: string) => Promise<void>;
+  // Reviewers and Admins can use normal app functionality (upload, process,
+  // review, export). Guests (no user) can only view.
+  canEdit: boolean;
+  isAdmin: boolean;
+  login: (name: string, password: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -44,8 +48,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loadUser();
   }, [loadUser]);
 
-  const login = useCallback(async (name: string, passcode: string) => {
-    const { access_token } = await api.login(name, passcode);
+  const login = useCallback(async (name: string, password: string) => {
+    const { access_token } = await api.login(name, password);
     api.setToken(access_token);
     const me = await api.getMe();
     setUser(me);
@@ -56,9 +60,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  const isAdmin = user?.role === "admin";
+  const canEdit = user?.role === "admin" || user?.role === "reviewer";
+
   return (
     <AuthContext.Provider
-      value={{ user, isLoading, isAuthenticated: !!user, login, logout }}
+      value={{
+        user,
+        isLoading,
+        isAuthenticated: !!user,
+        canEdit,
+        isAdmin,
+        login,
+        logout,
+      }}
     >
       {children}
     </AuthContext.Provider>

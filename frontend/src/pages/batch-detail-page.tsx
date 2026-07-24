@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { RotatedImage, FullscreenLightbox } from '@/components/shared/image-lightbox'
+import { useAuth } from '@/lib/auth'
 import type { BatchDuplicatePair, RawScan } from '@/lib/types'
 
 // --- All-Scans tab ---
@@ -362,11 +363,11 @@ type TabId = 'scans' | 'duplicates'
 export function BatchDetailPage() {
   const { id } = useParams<{ id: string }>()
   const batchId = Number(id)
+  const { canEdit } = useAuth()
   const [selectedScan, setSelectedScan] = useState<RawScan | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
   const [isExporting, setIsExporting] = useState(false)
   const [activeTab, setActiveTab] = useState<TabId>('scans')
-  const [mountId] = useState(() => Math.random().toString(36).slice(2, 9))
   const queryClient = useQueryClient()
 
   const { data: batch, isLoading: batchLoading } = useQuery({
@@ -465,7 +466,7 @@ export function BatchDetailPage() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {hasCroppedImages && (
+              {hasCroppedImages && canEdit && (
                 <Button
                   variant="secondary"
                   size="sm"
@@ -481,7 +482,7 @@ export function BatchDetailPage() {
                   {isExporting ? 'Preparing\u2026' : 'Download ZIP'}
                 </Button>
               )}
-              {showForceAdvance && (
+              {showForceAdvance && canEdit && (
                 <Button
                   variant="secondary"
                   size="sm"

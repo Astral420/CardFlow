@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, Link, useLocation } from "react-router-dom";
 import {
   LayoutGrid,
   Layers,
@@ -7,6 +7,7 @@ import {
   BookOpen,
   Settings,
   LogOut,
+  LogIn,
   ChevronLeft,
   Sun,
   Moon,
@@ -113,6 +114,7 @@ export function Sidebar() {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { collapsed, toggle } = useSidebar();
+  const location = useLocation();
 
   const rotationCount = useQuery({
     queryKey: ["queue-count", "rotation"],
@@ -260,23 +262,40 @@ export function Sidebar() {
           )}
         </button>
 
-        {/* User / logout */}
-        <button
-          onClick={logout}
-          title={collapsed ? `${user?.name} — Sign out` : undefined}
-          className={cn(
-            "flex w-full items-center rounded-lg py-2 text-left transition-colors duration-150 hover:bg-muted",
-            collapsed ? "justify-center px-0" : "justify-between px-2.5"
-          )}
-        >
-          {!collapsed && (
-            <div className="min-w-0">
-              <p className="truncate text-caption font-medium text-primary">{user?.name}</p>
-              <p className="truncate text-caption text-muted-foreground">Sign out</p>
-            </div>
-          )}
-          <LogOut className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        </button>
+        {/* User / logout, or Sign in for Guests */}
+        {user ? (
+          <button
+            onClick={logout}
+            title={collapsed ? `${user.name} — Sign out` : undefined}
+            className={cn(
+              "flex w-full items-center rounded-lg py-2 text-left transition-colors duration-150 hover:bg-muted",
+              collapsed ? "justify-center px-0" : "justify-between px-2.5"
+            )}
+          >
+            {!collapsed && (
+              <div className="min-w-0">
+                <p className="truncate text-caption font-medium text-primary">{user.name}</p>
+                <p className="truncate text-caption text-muted-foreground">Sign out</p>
+              </div>
+            )}
+            <LogOut className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          </button>
+        ) : (
+          <Link
+            to="/login"
+            state={{ from: location.pathname }}
+            title={collapsed ? "Sign in" : undefined}
+            className={cn(
+              "flex w-full items-center rounded-lg py-2 text-left transition-colors duration-150 hover:bg-muted",
+              collapsed ? "justify-center px-0" : "justify-between px-2.5"
+            )}
+          >
+            {!collapsed && (
+              <p className="truncate text-caption font-medium text-primary">Sign in</p>
+            )}
+            <LogIn className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          </Link>
+        )}
       </div>
     </aside>
   );

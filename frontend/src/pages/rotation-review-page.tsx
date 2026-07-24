@@ -17,6 +17,7 @@ import { Card } from '@/components/ui/card'
 import { useToast } from '@/components/ui/toast'
 import { PageHeader } from '@/components/shared/page-header'
 import { SectionLabel } from '@/components/shared/section-label'
+import { useAuth } from '@/lib/auth'
 import type { CropQueueItem, RotationNext } from '@/lib/types'
 
 function CardImagePanel({
@@ -90,6 +91,7 @@ function CardImagePanel({
 export function RotationReviewPage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  const { canEdit } = useAuth()
 
   const { data: current, isLoading } = useQuery({
     queryKey: ['rotation-next'],
@@ -166,14 +168,14 @@ export function RotationReviewPage() {
 
   const handleRotate = useCallback(
     (cropId: number, degrees: number) => {
-      if (!rotateMutation.isPending) rotateMutation.mutate({ cropId, degrees })
+      if (canEdit && !rotateMutation.isPending) rotateMutation.mutate({ cropId, degrees })
     },
-    [rotateMutation]
+    [rotateMutation, canEdit]
   )
 
   const handleConfirm = useCallback(() => {
-    if (!confirmMutation.isPending) confirmMutation.mutate()
-  }, [confirmMutation])
+    if (canEdit && !confirmMutation.isPending) confirmMutation.mutate()
+  }, [confirmMutation, canEdit])
 
   const handleSkip = useCallback(() => {
     skipMutation.mutate()
@@ -248,13 +250,13 @@ export function RotationReviewPage() {
                 label="Front"
                 crop={current?.front}
                 onRotate={handleRotate}
-                disabled={rotateMutation.isPending || confirmMutation.isPending}
+                disabled={!canEdit || rotateMutation.isPending || confirmMutation.isPending}
               />
               <CardImagePanel
                 label="Back"
                 crop={current?.back}
                 onRotate={handleRotate}
-                disabled={rotateMutation.isPending || confirmMutation.isPending}
+                disabled={!canEdit || rotateMutation.isPending || confirmMutation.isPending}
               />
             </motion.div>
           </AnimatePresence>
@@ -305,7 +307,7 @@ export function RotationReviewPage() {
           <Button
             size="md"
             onClick={handleConfirm}
-            disabled={confirmMutation.isPending || rotateMutation.isPending}
+            disabled={!canEdit || confirmMutation.isPending || rotateMutation.isPending}
             className="gap-2 min-w-[190px]"
           >
             <CheckCircle2 className="h-4 w-4" />
@@ -316,7 +318,7 @@ export function RotationReviewPage() {
             variant="ghost"
             size="md"
             onClick={handleSkip}
-            disabled={confirmMutation.isPending}
+            disabled={!canEdit || confirmMutation.isPending}
             className="gap-2"
           >
             <SkipForward className="h-4 w-4" />
