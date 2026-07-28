@@ -89,8 +89,20 @@ function refreshOnce(): Promise<string | null> {
   return refreshInFlight;
 }
 
+// Module-level slot for the auth context to register a handler that
+// clears user state the instant a session revocation is detected.
+// This lets the UI degrade to Guest mode (canEdit/isAdmin = false)
+// synchronously, before the /login redirect fires -- so deleted users
+// can't see or interact with editor controls during the redirect.
+let _onSessionRevoked: (() => void) | null = null;
+
+export function setSessionRevokedHandler(cb: () => void) {
+  _onSessionRevoked = cb;
+}
+
 function forceLogoutRedirect() {
   setToken(null);
+  _onSessionRevoked?.();
   if (window.location.pathname !== "/login") {
     window.location.assign("/login");
   }

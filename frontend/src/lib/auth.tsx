@@ -50,6 +50,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loadUser();
   }, [loadUser]);
 
+  // Wire forceLogoutRedirect (in api.ts) into React state: when the
+  // interceptor detects a revoked session it calls this, setting user to
+  // null before the /login redirect fires. That way canEdit/isAdmin
+  // immediately become false and all editor controls disappear instead
+  // of staying visible during the brief redirect window.
+  useEffect(() => {
+    api.setSessionRevokedHandler(() => setUser(null));
+  }, []);
+
   // Poll /auth/me while authenticated so a server-side session revocation
   // (e.g. Admin deletes this account) is caught promptly. On a revoked
   // access token the backend returns 401; the response interceptor in
