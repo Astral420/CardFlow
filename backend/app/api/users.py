@@ -7,6 +7,7 @@ from app.db import get_db
 from app.models import User, UserRole
 from app.schemas import UserCreateRequest, UserOut
 from app.security import hash_password
+from app.token_store import revoke_user_sessions
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -75,3 +76,8 @@ def delete_reviewer(
             status.HTTP_409_CONFLICT,
             "This account has review history and can't be deleted",
         )
+
+    # Only after the delete has actually committed -- if it failed above
+    # (e.g. the IntegrityError case), the account still exists and its
+    # sessions should keep working normally.
+    revoke_user_sessions(user_id)

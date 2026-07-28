@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 
+import redis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -7,6 +8,7 @@ import app.celery_app
 from app.api import auth, batches, cards, duplicates, rotation, users
 
 from app.config import settings
+from app.redis_client import redis_client
 
 
 @asynccontextmanager
@@ -21,6 +23,18 @@ async def lifespan(_app: FastAPI):
             "placeholder value. Set real value(s) in .env before running "
             "the API."
         )
+
+    # Redis now backs session revocation, not just Celery -- if it's
+    # unreachable, login and token refresh would fail on the first real
+    # request anyway, so fail at startup instead where it's obvious why.
+    try:
+        redis_client.ping()
+    except redis.RedisError as exc:
+        raise RuntimeError(
+            f"Refusing to start: can't reach Redis at {settings.redis_auth_url} "
+            "(needed for login and session revocation)."
+        ) from exc
+
     yield
 
 

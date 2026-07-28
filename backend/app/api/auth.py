@@ -1,6 +1,6 @@
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -9,7 +9,13 @@ from app.db import get_db
 from app.models import User
 from app.rate_limit import is_rate_limited
 from app.schemas import LoginRequest, TokenResponse, UserOut
-from app.security import create_access_token, verify_password
+from app.security import (
+    create_access_token,
+    create_refresh_token,
+    revoke_refresh_token,
+    rotate_refresh_token,
+    verify_password,
+)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -18,10 +24,39 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 10
 LOGIN_RATE_LIMIT_WINDOW_SECONDS = 60.0
 
+# Scope the refresh cookie to just the auth routes -- the browser then
+# only ever attaches it to /login, /refresh, /logout, never to every
+# other /api/* call, which limits its exposure.
+_REFRESH_COOKIE_PATH = "/api/auth"
+
+
+def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
+    response.set_cookie(
+        key=settings.refresh_cookie_name,
+        value=refresh_token,
+        httponly=True,
+        secure=settings.refresh_cookie_secure,
+        samesite=settings.refresh_cookie_samesite,
+        domain=settings.refresh_cookie_domain,
+        path=_REFRESH_COOKIE_PATH,
+        max_age=settings.refresh_token_expires_days * 86400,
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=settings.refresh_cookie_name,
+        domain=settings.refresh_cookie_domain,
+        path=_REFRESH_COOKIE_PATH,
+    )
+
 
 @router.post("/login", response_model=TokenResponse)
 def login(
-    payload: LoginRequest, request: Request, db: Session = Depends(get_db)
+    payload: LoginRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
 ) -> TokenResponse:
     # Two ways to authenticate, distinguished by whether the account has an
     # individual password set (see app.models.user.User.password_hash):
@@ -56,8 +91,44 @@ def login(
     if user is None or not credential_ok:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
 
-    token = create_access_token(user.id)
-    return TokenResponse(access_token=token)
+    access_token = create_access_token(user.id)
+    refresh_token = create_refresh_token(user.id)
+    _set_refresh_cookie(response, refresh_token)
+    return TokenResponse(access_token=access_token)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+def refresh(request: Request, response: Response) -> TokenResponse:
+    """Exchange the httpOnly refresh cookie for a new access token,
+    rotating the refresh token in the same call. The frontend calls this
+    transparently whenever an access token has expired or gone missing
+    (see the response interceptor in frontend/src/lib/api.ts) -- the
+    person never sees this as a separate "log in" step."""
+    token = request.cookies.get(settings.refresh_cookie_name)
+    if token is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "No refresh session")
+
+    rotated = rotate_refresh_token(token)
+    if rotated is None:
+        _clear_refresh_cookie(response)
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "Session expired, please sign in again"
+        )
+
+    access_token, new_refresh_token = rotated
+    _set_refresh_cookie(response, new_refresh_token)
+    return TokenResponse(access_token=access_token)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(request: Request, response: Response) -> None:
+    """Revoke just the current session's refresh token and clear its
+    cookie. Deliberately doesn't require a valid access token -- signing
+    out should work even if the access token already expired."""
+    token = request.cookies.get(settings.refresh_cookie_name)
+    if token is not None:
+        revoke_refresh_token(token)
+    _clear_refresh_cookie(response)
 
 
 @router.get("/me", response_model=UserOut)

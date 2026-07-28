@@ -32,6 +32,10 @@ def _fake_request(ip: str):
     return request
 
 
+def _fake_response():
+    return MagicMock()
+
+
 def setup_function(_):
     rate_limit.reset()
 
@@ -58,6 +62,7 @@ def test_login_rejects_wrong_password_without_tripping_rate_limit_early():
         login(
             LoginRequest(name="alex", password="wrong"),
             _fake_request("1.2.3.4"),
+            _fake_response(),
             db=db,
         )
     assert exc_info.value.status_code == 401
@@ -73,6 +78,7 @@ def test_login_blocks_after_too_many_attempts_from_same_ip():
             login(
                 LoginRequest(name="alex", password="wrong"),
                 _fake_request("9.9.9.9"),
+                _fake_response(),
                 db=db,
             )
         assert exc_info.value.status_code == 401
@@ -81,6 +87,7 @@ def test_login_blocks_after_too_many_attempts_from_same_ip():
         login(
             LoginRequest(name="alex", password=settings.app_passcode),
             _fake_request("9.9.9.9"),
+            _fake_response(),
             db=db,
         )
     assert exc_info.value.status_code == 429
@@ -96,6 +103,7 @@ def test_login_from_a_different_ip_is_not_affected_by_another_ips_lockout():
             login(
                 LoginRequest(name="alex", password="wrong"),
                 _fake_request("9.9.9.9"),
+                _fake_response(),
                 db=db,
             )
 
@@ -104,6 +112,7 @@ def test_login_from_a_different_ip_is_not_affected_by_another_ips_lockout():
         login(
             LoginRequest(name="alex", password="wrong"),
             _fake_request("1.1.1.1"),
+            _fake_response(),
             db=db,
         )
     assert exc_info.value.status_code == 401

@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     # Celery result backend (separate DB index from the broker above so
     # results don't collide with queued task messages).
     redis_result_backend_url: str = "redis://localhost:6379/1"
+    # Auth session state (access-token revocation markers, refresh-token
+    # family registry -- see app.token_store). Its own DB index for the
+    # same reason as the result backend: independent of Celery's traffic,
+    # so flushing/inspecting one doesn't touch the others.
+    redis_auth_url: str = "redis://localhost:6379/2"
 
     r2_account_id: str = ""
     r2_access_key_id: str = ""
@@ -23,8 +28,31 @@ class Settings(BaseSettings):
 
     secret_key: str = _INSECURE_DEFAULT
     jwt_algorithm: str = "HS256"
-    jwt_expires_minutes: int = 60 * 24 * 14  # 2 weeks — two known users, low risk
+    # Short-lived on purpose -- this is what limits how long a revoked
+    # user's outstanding access token stays technically valid if the
+    # Redis revocation check were ever bypassed. The refresh token (below)
+    # is what makes a short access-token life tolerable for the user.
+    access_token_expires_minutes: int = 15
+    refresh_token_expires_days: int = 30
     app_passcode: str = _INSECURE_DEFAULT
+
+    # Refresh token is delivered as an httpOnly cookie rather than JSON
+    # (unlike the access token) so it's never reachable from JS -- an XSS
+    # bug can steal the short-lived access token out of localStorage, but
+    # not the refresh token, which is what actually grants long-term
+    # access. The frontend is deployed separately from the API (Vercel +
+    # Cloudflare Tunnel), so this cookie is genuinely cross-site: SameSite
+    # "none" + Secure aren't just best practice here, browsers require
+    # both before they'll accept a cross-site cookie at all. For local
+    # dev, Vite's /api proxy (vite.config.ts) makes requests same-origin,
+    # so these defaults work locally too *except* that "Secure" requires
+    # HTTPS -- if your browser drops the cookie in local dev, override
+    # REFRESH_COOKIE_SECURE=false and REFRESH_COOKIE_SAMESITE=lax in
+    # backend/.env.
+    refresh_cookie_name: str = "cardflow_refresh"
+    refresh_cookie_secure: bool = True
+    refresh_cookie_samesite: str = "none"
+    refresh_cookie_domain: str | None = None
 
     cors_origins: list[str] = ["http://localhost:5173"]
 

@@ -45,6 +45,13 @@ def _fake_request(ip: str = "1.2.3.4"):
     return request
 
 
+def _fake_response():
+    # login() now sets a refresh-token cookie on the response
+    # (app.api.auth._set_refresh_cookie) -- a MagicMock happily accepts
+    # that .set_cookie(...) call without needing a real Response.
+    return MagicMock()
+
+
 # ---- Login: legacy shared-passcode vs. individual Reviewer password ----
 
 
@@ -53,7 +60,12 @@ def test_legacy_seeded_user_still_logs_in_with_shared_passcode():
     db.add(User(name="alex", role=UserRole.admin))  # no password_hash
     db.commit()
 
-    token = login(LoginRequest(name="alex", password=settings.app_passcode), _fake_request(), db=db)
+    token = login(
+        LoginRequest(name="alex", password=settings.app_passcode),
+        _fake_request(),
+        _fake_response(),
+        db=db,
+    )
     assert token.access_token
 
 
@@ -69,7 +81,12 @@ def test_reviewer_with_individual_password_cannot_use_shared_passcode():
     db.commit()
 
     with pytest.raises(HTTPException) as exc_info:
-        login(LoginRequest(name="jamie", password=settings.app_passcode), _fake_request(), db=db)
+        login(
+            LoginRequest(name="jamie", password=settings.app_passcode),
+            _fake_request(),
+            _fake_response(),
+            db=db,
+        )
     assert exc_info.value.status_code == 401
 
 
@@ -87,6 +104,7 @@ def test_reviewer_logs_in_with_their_own_password():
     token = login(
         LoginRequest(name="jamie", password="correct horse battery staple"),
         _fake_request(),
+        _fake_response(),
         db=db,
     )
     assert token.access_token
@@ -98,9 +116,19 @@ def test_unknown_user_and_wrong_password_return_the_same_generic_error():
     db.commit()
 
     with pytest.raises(HTTPException) as unknown_exc:
-        login(LoginRequest(name="nobody", password="whatever"), _fake_request("2.2.2.2"), db=db)
+        login(
+            LoginRequest(name="nobody", password="whatever"),
+            _fake_request("2.2.2.2"),
+            _fake_response(),
+            db=db,
+        )
     with pytest.raises(HTTPException) as wrong_exc:
-        login(LoginRequest(name="alex", password="whatever"), _fake_request("3.3.3.3"), db=db)
+        login(
+            LoginRequest(name="alex", password="whatever"),
+            _fake_request("3.3.3.3"),
+            _fake_response(),
+            db=db,
+        )
 
     assert unknown_exc.value.status_code == wrong_exc.value.status_code == 401
     assert unknown_exc.value.detail == wrong_exc.value.detail

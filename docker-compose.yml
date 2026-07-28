@@ -26,6 +26,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://card_tool:card_tool@postgres:5432/card_tool
       REDIS_URL: redis://redis:6379/0
+      REDIS_AUTH_URL: redis://redis:6379/2
     ports:
       - "8000:8000"
     volumes:

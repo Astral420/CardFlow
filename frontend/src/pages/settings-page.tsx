@@ -14,6 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog'
 import { useToast } from '@/components/ui/toast'
 import { PageHeader } from '@/components/shared/page-header'
+import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 
 const PIPELINE_STEPS = [
   { step: 1, label: 'Batch Upload', desc: 'Zip extraction, raw scan indexing' },
@@ -113,22 +114,25 @@ function UserManagementCard() {
 
   const { data: users, isLoading } = useQuery({ queryKey: ['users'], queryFn: listUsers })
 
+  const [pendingDelete, setPendingDelete] = useState<User | null>(null)
+
   const deleteMutation = useMutation({
     mutationFn: (userId: number) => deleteUser(userId),
     onSuccess: () => {
       toast({ title: 'Account deleted', variant: 'success' })
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      setPendingDelete(null)
     },
     onError: (err) => {
       toast({ title: 'Could not delete account', description: apiErrorMessage(err), variant: 'error' })
     },
   })
 
-  function handleDelete(target: User) {
-    const confirmed = window.confirm(
-      `Remove ${target.name}'s account? They won't be able to sign in anymore.`
-    )
-    if (confirmed) deleteMutation.mutate(target.id)
+  function closeDeleteDialog(open: boolean) {
+    if (!open) {
+      setPendingDelete(null)
+      deleteMutation.reset()
+    }
   }
 
   return (
@@ -169,7 +173,7 @@ function UserManagementCard() {
                     <IconButton
                       label={`Remove ${account.name}`}
                       variant="ghost"
-                      onClick={() => handleDelete(account)}
+                      onClick={() => setPendingDelete(account)}
                       disabled={deleteMutation.isPending}
                     >
                       <Trash2 className="h-3.5 w-3.5 text-accent-rose-foreground" />
@@ -183,6 +187,28 @@ function UserManagementCard() {
           )}
         </div>
       </CardContent>
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={closeDeleteDialog}
+        title="Remove this account?"
+        confirmLabel="Delete account"
+        loadingLabel="Deleting…"
+        destructive
+        isLoading={deleteMutation.isPending}
+        error={deleteMutation.isError ? apiErrorMessage(deleteMutation.error) : null}
+        onConfirm={() => {
+          if (pendingDelete) deleteMutation.mutate(pendingDelete.id)
+        }}
+      >
+        <p className="text-body text-primary">
+          Remove <span className="font-semibold">{pendingDelete?.name}</span>&apos;s account?
+        </p>
+        <p className="text-caption text-muted-foreground">
+          This is permanent and can&apos;t be undone. They&apos;ll be signed out immediately and
+          won&apos;t be able to log back in.
+        </p>
+      </ConfirmDialog>
     </Card>
   )
 }

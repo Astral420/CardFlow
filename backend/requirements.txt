@@ -24,3 +24,4 @@ bcrypt==4.2.1
 
 pytest==8.3.4
 httpx==0.28.1
+fakeredis==2.26.2  # in-memory Redis stand-in for tests (see tests/conftest.py)

@@ -1,4 +1,4 @@
-import axios, { type AxiosError } from "axios";
+import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
 import type {
   Batch,
   BatchDetail,
@@ -27,6 +27,10 @@ export function setToken(token: string | null) {
 
 export const client = axios.create({
   baseURL: "/api",
+  // The refresh token travels as an httpOnly cookie (never touches JS) --
+  // this is what makes the browser actually send/accept it on the
+  // /auth/login, /auth/refresh, and /auth/logout calls below.
+  withCredentials: true,
 });
 
 client.interceptors.request.use((config) => {
@@ -49,6 +53,97 @@ export function apiErrorMessage(error: unknown): string {
   return "Something went wrong";
 }
 
+// ---- Session recovery / forced logout ----
+//
+// A 401 here always means "this session is no longer valid" -- every
+// endpoint that can 401 requires auth, and the UI only ever calls those
+// when canEdit/isAdmin is true, so there's no legitimate "you're an
+// unauthenticated Guest" 401 to distinguish from a real one.
+//
+// On a 401, try exactly one silent refresh (via the httpOnly cookie) and
+// retry the original request with the new access token. If the refresh
+// itself fails -- expired refresh token, or an Admin revoked this
+// account's sessions -- fall through to a hard client-side logout and
+// redirect, which is what actually fixes the "deleted user stays logged
+// in until manual refresh" bug: the very next request this tab makes
+// (the sidebar/dashboard polling queries fire every 15s) now forces the
+// user out on its own.
+
+let refreshInFlight: Promise<string | null> | null = null;
+
+function refreshOnce(): Promise<string | null> {
+  if (!refreshInFlight) {
+    refreshInFlight = refreshAccessToken()
+      .then(({ access_token }) => {
+        setToken(access_token);
+        return access_token;
+      })
+      .catch(() => {
+        setToken(null);
+        return null;
+      })
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
+function forceLogoutRedirect() {
+  setToken(null);
+  if (window.location.pathname !== "/login") {
+    window.location.assign("/login");
+  }
+}
+
+type RetriableConfig = InternalAxiosRequestConfig & { _retried?: boolean };
+
+client.interceptors.response.use(
+  (response) => response,
+  async (error: unknown) => {
+    if (!axios.isAxiosError(error) || error.response?.status !== 401 || !error.config) {
+      return Promise.reject(error);
+    }
+
+    const original = error.config as RetriableConfig;
+    const url = original.url ?? "";
+    const isAuthEndpoint =
+      url.includes("/auth/login") || url.includes("/auth/refresh") || url.includes("/auth/logout");
+
+    if (isAuthEndpoint || original._retried) {
+      // A failed login attempt (wrong password) is a normal form error,
+      // not a session ending -- don't bounce someone off the login page
+      // for typing the wrong password. Everything else (a failed
+      // refresh, or a retried request that still 401s) means the
+      // session is genuinely gone.
+      //
+      // Guard on getToken(): a Guest probing /auth/me has no access
+      // token and no refresh cookie. Their /auth/refresh call 401s here
+      // too, but they were never "logged in" -- only redirect when there
+      // was actually a token to lose.
+      if (!url.includes("/auth/login") && getToken()) {
+        forceLogoutRedirect();
+      }
+      return Promise.reject(error);
+    }
+
+    original._retried = true;
+    const newToken = await refreshOnce();
+    if (!newToken) {
+      // refreshOnce().catch already called setToken(null) before we
+      // reach here, so this guard is belt-and-suspenders -- but
+      // consistent with the intent above.
+      if (getToken()) {
+        forceLogoutRedirect();
+      }
+      return Promise.reject(error);
+    }
+
+    original.headers.Authorization = `Bearer ${newToken}`;
+    return client(original);
+  }
+);
+
 // ---- Auth ----
 
 export async function login(name: string, password: string) {
@@ -62,6 +157,25 @@ export async function login(name: string, password: string) {
 export async function getMe() {
   const { data } = await client.get<User>("/auth/me");
   return data;
+}
+
+export async function refreshAccessToken() {
+  const { data } = await client.post<{ access_token: string; token_type: string }>(
+    "/auth/refresh"
+  );
+  return data;
+}
+
+export async function logout() {
+  try {
+    await client.post("/auth/logout");
+  } catch {
+    // Best-effort -- even if this fails (offline, etc.) the local
+    // session below still gets cleared, which is what actually matters
+    // for this tab.
+  } finally {
+    setToken(null);
+  }
 }
 
 // ---- Batches ----
