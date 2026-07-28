@@ -139,6 +139,7 @@ export function RotationReviewPage() {
     onSuccess: (next) => {
       queryClient.setQueryData(['rotation-next'], next)
       queryClient.invalidateQueries({ queryKey: ['queue-count', 'rotation'] })
+      queryClient.invalidateQueries({ queryKey: ['batches'] })
     },
     onError: () => {
       toast({ title: 'Confirm failed', variant: 'error' })

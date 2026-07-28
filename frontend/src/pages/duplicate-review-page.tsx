@@ -182,6 +182,7 @@ export function DuplicateReviewPage() {
     onSuccess: (next) => {
       queryClient.setQueryData(['duplicate-next'], next)
       queryClient.invalidateQueries({ queryKey: ['queue-count', 'duplicate'] })
+      queryClient.invalidateQueries({ queryKey: ['batches'] })
     },
     onError: () => {
       toast({ title: 'Action failed', variant: 'error' })
