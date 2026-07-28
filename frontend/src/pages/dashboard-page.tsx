@@ -49,6 +49,11 @@ export function DashboardPage() {
   const { data: batches, isLoading: batchesLoading } = useQuery({
     queryKey: ['batches'],
     queryFn: () => listBatches(5),
+    refetchInterval: (query) => {
+      const list = query.state.data ?? []
+      const hasActive = list.some((b) => b.status === 'extracting' || b.status === 'cropping')
+      return hasActive ? 3000 : 15_000
+    },
   })
 
   const { data: rotationCount } = useQuery({

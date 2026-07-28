@@ -374,12 +374,19 @@ export function BatchDetailPage() {
     queryKey: ['batch', batchId],
     queryFn: () => getBatch(batchId),
     enabled: !!batchId,
+    refetchInterval: (query) => {
+      const b = query.state.data
+      return b && (b.status === 'extracting' || b.status === 'cropping') ? 2500 : false
+    },
   })
 
   const { data: scans, isLoading: scansLoading } = useQuery({
     queryKey: ['batch-scans', batchId],
     queryFn: () => getBatchScans(batchId),
     enabled: !!batchId,
+    refetchInterval: () => {
+      return batch && (batch.status === 'extracting' || batch.status === 'cropping') ? 2500 : false
+    },
   })
 
   const { data: duplicates, isLoading: duplicatesLoading } = useQuery({
@@ -409,13 +416,23 @@ export function BatchDetailPage() {
     }
   }
 
-  const progressValue =
-    !batch ? 0 :
-      batch.status === 'complete' ? 100 :
-        batch.status === 'duplicate_review' ? 80 :
-          batch.status === 'rotation_review' ? 60 :
-            batch.status === 'cropping' ? 40 :
-              batch.status === 'extracting' ? 20 : 0
+  let progressValue = 0
+  if (batch) {
+    if (batch.status === 'complete') {
+      progressValue = 100
+    } else if (batch.status === 'duplicate_review') {
+      progressValue = 80
+    } else if (batch.status === 'rotation_review') {
+      progressValue = 60
+    } else if (batch.status === 'cropping') {
+      const total = batch.counts.scans
+      const done = batch.counts.cropped + batch.counts.crop_failed
+      const cropRatio = total > 0 ? done / total : 0
+      progressValue = Math.round(40 + cropRatio * 20)
+    } else if (batch.status === 'extracting') {
+      progressValue = 20
+    }
+  }
 
   const showForceAdvance =
     batch?.status === 'cropping' &&

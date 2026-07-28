@@ -196,6 +196,11 @@ export function BatchesPage() {
   const { data: batches, isLoading } = useQuery({
     queryKey: ['batches'],
     queryFn: () => listBatches(100),
+    refetchInterval: (query) => {
+      const list = query.state.data ?? []
+      const hasActive = list.some((b) => b.status === 'extracting' || b.status === 'cropping')
+      return hasActive ? 3000 : false
+    },
   })
 
   const matchesSearch = (b: Batch) =>
