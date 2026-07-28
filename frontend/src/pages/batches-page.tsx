@@ -47,6 +47,14 @@ const STATUS_DOT_CLASS: Record<BatchStatus, string> = {
   complete: 'bg-accent-mint-solid',
 }
 
+const STATUS_PROGRESS_CLASS: Record<BatchStatus, string> = {
+  extracting: 'bg-accent-peach-solid',
+  cropping: 'bg-accent-blue-solid',
+  rotation_review: 'bg-accent-lavender-solid',
+  duplicate_review: 'bg-accent-lavender-solid',
+  complete: 'bg-accent-mint-solid',
+}
+
 function progressForStatus(status: BatchStatus) {
   return status === 'complete' ? 100 :
     status === 'duplicate_review' ? 80 :
@@ -82,7 +90,7 @@ function BatchCard({ batch }: { batch: Batch }) {
               <span className="text-caption text-muted-foreground">Pipeline progress</span>
               <span className="text-caption font-medium text-primary">{progressValue}%</span>
             </div>
-            <ProgressBar value={progressValue} />
+            <ProgressBar value={progressValue} barClassName={STATUS_PROGRESS_CLASS[batch.status]} />
           </div>
           <div className="flex items-center gap-1 text-caption text-muted-foreground">
             <span>ID: {batch.id}</span>

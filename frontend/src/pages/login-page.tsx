@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, Link } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/auth";
@@ -85,6 +86,16 @@ export function LoginPage() {
             {isSubmitting ? "Signing in…" : "Sign in"}
           </Button>
         </form>
+
+        <div className="mt-6 border-t border-border pt-4 text-center">
+          <Link
+            to="/"
+            className="inline-flex items-center gap-1.5 text-caption font-medium text-muted-foreground transition-colors hover:text-primary"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Back to Dashboard (Guest mode)
+          </Link>
+        </div>
       </div>
     </div>
   );
