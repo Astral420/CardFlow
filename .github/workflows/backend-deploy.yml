@@ -44,7 +44,7 @@ jobs:
       - name: Install cloudflared (pin the version — see §4's changelog warning)
         run: |
           curl -L --output cloudflared.deb \
-            https://github.com/cloudflare/cloudflared/releases/download/2026.5.1/cloudflared-linux-amd64.deb
+            https://github.com/cloudflare/cloudflared/releases/download/2026.7.3/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared.deb
 
       - name: Write deploy SSH key
