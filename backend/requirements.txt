@@ -19,7 +19,7 @@ numpy==2.2.1
 
 boto3==1.35.90
 
-python-jose[cryptography]==3.3.0
+python-jose[cryptography]==3.4.0
 bcrypt==4.2.1
 
 pytest==9.0.3
