@@ -15,7 +15,7 @@ export const BATCH_STATUS_META: Record<
 export function BatchStatusBadge({ status }: { status: BatchStatus }) {
   const meta = BATCH_STATUS_META[status];
   return (
-    <Badge variant={meta.variant} dot>
+    <Badge variant={meta.variant}>
       {meta.label}
     </Badge>
   );
@@ -33,7 +33,7 @@ const SCAN_STATUS_META: Record<
 export function ScanStatusBadge({ status }: { status: ScanStatus }) {
   const meta = SCAN_STATUS_META[status];
   return (
-    <Badge variant={meta.variant} dot>
+    <Badge variant={meta.variant}>
       {meta.label}
     </Badge>
   );
@@ -49,9 +49,11 @@ const DUPLICATE_STATUS_META: Record<
 };
 
 export function DuplicateStatusBadge({ status }: { status: DuplicateStatus }) {
-  const meta = DUPLICATE_STATUS_META[status];
+  // Guard against unknown status values from the API (e.g. legacy records)
+  // to prevent a white-screen crash when meta is undefined.
+  const meta = DUPLICATE_STATUS_META[status] ?? { label: status ?? "Unknown", variant: "neutral" as const };
   return (
-    <Badge variant={meta.variant} dot>
+    <Badge variant={meta.variant}>
       {meta.label}
     </Badge>
   );

@@ -5,6 +5,12 @@ the detected rectangle slightly so dark card edges are not mistaken for
 background, and perspective-warp while preserving portrait vs landscape
 orientation. The aspect-ratio safety check still flags suspect detections
 instead of silently corrupting downstream hashes.
+
+Some intake sources hand us images that are already cropped tight to the
+card (e.g. a scanner that auto-crops on-device) rather than a raw shot of
+the whole scan bed. Those are detected up front, before contour detection
+runs, and short-circuited to a passthrough path -- see
+`_perimeter_background_fraction` / `_passthrough_crop` below.
 """
 
 from dataclasses import dataclass
@@ -47,12 +53,70 @@ def _clean_mask(mask: np.ndarray) -> np.ndarray:
     return mask
 
 
+def _perimeter_background_fraction(gray: np.ndarray, threshold: int) -> float:
+    """Fraction of the image's own border pixels that read as scan background.
+
+    A raw, uncropped scan sits on a near-black bed, so its outermost row/
+    column of pixels is almost entirely background. An image that arrives
+    already cropped (e.g. by the scanning device itself) has little to no
+    such border left -- the card or its sleeve/toploader already runs to
+    the frame edge on most or all sides. This ratio is the signal used to
+    tell the two cases apart before deciding whether to run contour
+    detection at all.
+    """
+    top = gray[0, :]
+    bottom = gray[-1, :]
+    left = gray[:, 0]
+    right = gray[:, -1]
+    perimeter = np.concatenate([top, bottom, left, right])
+    return float(np.count_nonzero(perimeter <= threshold)) / perimeter.size
+
+
+def _passthrough_crop(image: np.ndarray) -> CropResult:
+    """Build a CropResult for input that's already cropped to the card.
+
+    There's no background bed around it for us to find and remove, so
+    there's nothing for contour detection + perspective warp to usefully
+    do. Worse, minAreaRect's angle estimate is unstable on a contour that
+    already spans (or nearly spans) the full frame -- exactly the
+    already-cropped case -- so running it anyway risks introducing a
+    spurious rotation/flip into an image that was already sitting upright.
+    Pass the pixels through untouched (re-encoding only) and validate
+    against a tolerance meant for input we didn't crop ourselves.
+    """
+    height, width = image.shape[:2]
+    long_side = max(width, height)
+    short_side = min(width, height)
+    aspect_ratio = long_side / short_side if short_side > 0 else 0.0
+    aspect_ratio_ok = (
+        abs(aspect_ratio - settings.expected_card_aspect_ratio)
+        <= settings.precropped_aspect_ratio_tolerance
+    )
+    orientation = "landscape" if width >= height else "portrait"
+
+    ok, buf = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    if not ok:
+        raise ValueError("Failed to encode cropped image")
+
+    bbox = [
+        [0.0, 0.0],
+        [float(width - 1), 0.0],
+        [float(width - 1), float(height - 1)],
+        [0.0, float(height - 1)],
+    ]
+
+    return CropResult(
+        image_bytes=buf.tobytes(),
+        bbox=bbox,
+        aspect_ratio=aspect_ratio,
+        aspect_ratio_ok=aspect_ratio_ok,
+        orientation=orientation,
+    )
+
+
 def _candidate_contours(gray: np.ndarray) -> list[np.ndarray]:
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
-    _, otsu = cv2.threshold(
-        blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-    )
     _, non_background = cv2.threshold(
         blurred,
         settings.scan_background_threshold,
@@ -64,8 +128,22 @@ def _candidate_contours(gray: np.ndarray) -> list[np.ndarray]:
     edge_kernel = np.ones((5, 5), np.uint8)
     edges = cv2.dilate(edges, edge_kernel, iterations=1)
 
+    # NOTE: an Otsu-thresholded mask used to be included here as a third
+    # candidate source. It has been removed. Otsu picks a single global
+    # split point from the image's own brightness histogram, which assumes
+    # the frame is roughly bimodal (object vs. background). Laminated/
+    # protector-sleeve scans on a near-black bed are not: they contain the
+    # background, the card border, the (often much brighter) printed
+    # artwork, and glare streaks off the sleeve, i.e. several brightness
+    # clusters. Otsu has no notion of "near-black scan background" and will
+    # happily draw its line between the artwork and everything else,
+    # isolating only the brightest interior panel as "foreground." That
+    # panel is a real, clean, solidly-shaped contour, so nothing downstream
+    # flags it as wrong -- it just happens to describe the art box, not the
+    # card. `non_background` (threshold against settings.scan_background_
+    # threshold) and its edge-augmented variant are both anchored to the
+    # actual near-black bed, which is the correct invariant for this rig.
     masks = [
-        _clean_mask(otsu),
         _clean_mask(non_background),
         _clean_mask(cv2.bitwise_or(non_background, edges)),
     ]
@@ -77,7 +155,9 @@ def _candidate_contours(gray: np.ndarray) -> list[np.ndarray]:
     return contours
 
 
-def _score_contour(contour: np.ndarray, image_area: int) -> tuple[float, float]:
+def _score_contour(
+    contour: np.ndarray, image_area: int, max_candidate_area: int
+) -> tuple[float, float]:
     rect = cv2.minAreaRect(contour)
     (_, (rect_w, rect_h), _) = rect
     if rect_w <= 0 or rect_h <= 0:
@@ -86,13 +166,24 @@ def _score_contour(contour: np.ndarray, image_area: int) -> tuple[float, float]:
     long_side = max(rect_w, rect_h)
     short_side = min(rect_w, rect_h)
     aspect_ratio = long_side / short_side if short_side > 0 else 0.0
-    area_ratio = cv2.contourArea(contour) / max(1, image_area)
+    contour_area = cv2.contourArea(contour)
+    area_ratio = contour_area / max(1, image_area)
     aspect_error = abs(aspect_ratio - settings.expected_card_aspect_ratio)
 
-    # Prefer card-shaped contours, with area as a tie-breaker. Keeping area in
-    # the score prevents a bright interior panel from beating the full dark edge
-    # or protector contour when both are present.
-    return (aspect_error - min(area_ratio, 0.95) * 0.25, area_ratio)
+    # Relative-size penalty, scored against the largest candidate in *this*
+    # image rather than a flat fraction of the whole scan bed. A flat
+    # area_ratio bonus (e.g. "+0.25 per 100% of image area") is calibrated
+    # to one particular camera distance/bed size; tighten the zoom or crop
+    # the scan bed differently and the same bonus stops being big enough to
+    # out-vote a small-but-conveniently-card-shaped interior panel (this is
+    # what let the Otsu art-box contour win before). Comparing against the
+    # largest candidate actually found in this frame keeps the penalty
+    # meaningful regardless of scan setup: a contour at 20% of the biggest
+    # candidate's area is suspect no matter how big the image is.
+    relative_size = contour_area / max(1, max_candidate_area)
+    size_penalty = (1 - relative_size) * 0.5
+
+    return (aspect_error + size_penalty, area_ratio)
 
 
 def _best_contour(contours: list[np.ndarray], image_shape: tuple[int, ...]) -> np.ndarray:
@@ -102,7 +193,11 @@ def _best_contour(contours: list[np.ndarray], image_shape: tuple[int, ...]) -> n
     if not candidates:
         raise ValueError("No contours found against the scan background")
 
-    return min(candidates, key=lambda c: _score_contour(c, image_area))
+    max_candidate_area = max(cv2.contourArea(c) for c in candidates)
+    return min(
+        candidates,
+        key=lambda c: _score_contour(c, image_area, int(max_candidate_area)),
+    )
 
 
 def _expanded_box(rect: tuple, image_shape: tuple[int, ...]) -> np.ndarray:
@@ -153,6 +248,13 @@ def auto_crop(image_bytes: bytes) -> CropResult:
         raise ValueError("Could not decode image")
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    bg_fraction = _perimeter_background_fraction(
+        gray, settings.scan_background_threshold
+    )
+    if bg_fraction <= settings.precropped_perimeter_bg_max_fraction:
+        return _passthrough_crop(image)
+
     contours = _candidate_contours(gray)
     contour = _best_contour(contours, image.shape)
     rect = cv2.minAreaRect(contour)

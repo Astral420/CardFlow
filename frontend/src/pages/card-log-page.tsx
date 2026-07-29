@@ -1,26 +1,42 @@
 import { useEffect, useState, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ImageOff, BookOpen, ExternalLink } from 'lucide-react'
+import { ImageOff, BookOpen, ExternalLink, ChevronDown } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { listCards, listBatches, getCard } from '@/lib/api'
 import { ScanStatusBadge, DuplicateStatusBadge } from '@/components/shared/status-badge'
 import { EmptyState } from '@/components/shared/empty-state'
 import { PageHeader } from '@/components/shared/page-header'
-import { SectionLabel } from '@/components/shared/section-label'
 import { Toolbar } from '@/components/shared/toolbar'
 import { Badge } from '@/components/ui/badge'
 import { SearchBar } from '@/components/ui/search-bar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
-import { cn } from '@/lib/utils'
 import type { CardCrop } from '@/lib/types'
 
 const PAGE_SIZE = 48
 
-const selectClass = cn(
-  'h-9 rounded-lg border border-border bg-surface px-3 text-body text-primary outline-none',
-  'transition-colors duration-150 focus:border-primary/30 focus:ring-2 focus:ring-primary/10'
-)
+function FilterSelect({
+  value,
+  onChange,
+  children,
+}: {
+  value: string
+  onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void
+  children: React.ReactNode
+}) {
+  return (
+    <div className="relative flex items-center">
+      <select
+        value={value}
+        onChange={onChange}
+        className="h-9 appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-body text-primary outline-none transition-colors duration-150 focus:border-primary/30 focus:ring-2 focus:ring-primary/10 cursor-pointer"
+      >
+        {children}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-2.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+    </div>
+  )
+}
 
 function CardThumb({ card, onClick }: { card: CardCrop; onClick: () => void }) {
   return (
@@ -50,10 +66,10 @@ function CardThumb({ card, onClick }: { card: CardCrop; onClick: () => void }) {
       <div className="absolute bottom-0 left-0 right-0 translate-y-2 bg-gradient-to-t from-primary/90 to-transparent p-3 opacity-0 transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100">
         <p className="truncate text-[10px] font-medium text-white">{card.original_filename}</p>
       </div>
-      <div className="absolute right-1.5 top-1.5">
-        <Badge variant={card.side === 'front' ? 'blue' : 'neutral'} className="text-[10px]">
+      <div className="absolute right-3 top-3 pointer-events-none select-none">
+        <span className="inline-flex items-center rounded-md bg-slate-950/80 px-2 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-wider leading-none text-slate-200 backdrop-blur-md border border-slate-700/60 shadow-md">
           {card.side}
-        </Badge>
+        </span>
       </div>
     </motion.div>
   )
@@ -69,70 +85,34 @@ function CardDetailDrawer({ cropId, onClose }: { cropId: number; onClose: () => 
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
         title={detail?.original_filename ?? 'Card Detail'}
-        description={detail ? `Crop #${detail.id} — ${detail.side} face` : 'Loading…'}
+        description={detail ? `Crop #${detail.id} — ${detail.side} face` : 'Loading\u2026'}
         className="max-w-2xl"
       >
         {isLoading ? (
-          <div className="flex gap-6">
-            <Skeleton className="h-64 w-44 rounded-lg" />
-            <div className="flex-1 space-y-3">
-              <Skeleton className="h-5 w-24 rounded-lg" />
-              <Skeleton className="h-5 w-32 rounded-lg" />
-              <Skeleton className="h-5 w-40 rounded-lg" />
+          <div className="flex gap-5">
+            <Skeleton className="h-64 w-44 shrink-0 rounded-xl" />
+            <div className="flex flex-1 flex-col gap-2">
+              <Skeleton className="h-8 w-full rounded-lg" />
+              <Skeleton className="h-8 w-full rounded-lg" />
+              <Skeleton className="h-8 w-full rounded-lg" />
+              <Skeleton className="h-8 w-full rounded-lg" />
             </div>
           </div>
         ) : detail ? (
-          <div className="flex gap-6">
-            {detail.image_url ? (
-              <img
-                src={detail.image_url}
-                alt={detail.original_filename}
-                className="h-64 w-auto rounded-lg border border-border bg-muted object-contain"
-              />
-            ) : (
-              <div className="flex h-64 w-44 items-center justify-center rounded-lg border border-border bg-muted">
-                <ImageOff className="h-10 w-10 text-muted-foreground/40" />
-              </div>
-            )}
-            <div className="flex flex-1 flex-col gap-3 overflow-auto">
-              <div>
-                <SectionLabel>Status</SectionLabel>
-                <div className="mt-1 flex flex-wrap gap-2">
-                  <ScanStatusBadge status={detail.status} />
+          <div className="flex gap-5">
+            {/* ── Left: image panel ── */}
+            <div className="flex shrink-0 flex-col gap-2">
+              {detail.image_url ? (
+                <div className="h-64 w-44 overflow-hidden rounded-xl border border-border bg-muted">
+                  <img
+                    src={detail.image_url}
+                    alt={detail.original_filename}
+                    className="h-full w-full object-contain"
+                  />
                 </div>
-              </div>
-              <div>
-                <SectionLabel>Side</SectionLabel>
-                <Badge className="mt-1" variant={detail.side === 'front' ? 'blue' : 'neutral'}>{detail.side}</Badge>
-              </div>
-              <div>
-                <SectionLabel>Batch</SectionLabel>
-                <p className="mt-1 text-body text-primary">#{detail.batch_id}</p>
-              </div>
-              <div>
-                <SectionLabel>Rotation confirmed</SectionLabel>
-                <p className="mt-1 text-body text-primary">
-                  {detail.rotation_confirmed_at
-                    ? new Date(detail.rotation_confirmed_at).toLocaleString()
-                    : 'Not yet'}
-                </p>
-              </div>
-              {detail.aspect_ratio_ok != null && (
-                <div>
-                  <SectionLabel>Aspect ratio</SectionLabel>
-                  <Badge className="mt-1" variant={detail.aspect_ratio_ok ? 'mint' : 'rose'}>
-                    {detail.aspect_ratio_ok ? 'OK' : 'Out of tolerance'}
-                  </Badge>
-                </div>
-              )}
-              {detail.duplicate_history?.length > 0 && (
-                <div>
-                  <SectionLabel>Duplicate flags</SectionLabel>
-                  <div className="mt-1 space-y-1">
-                    {detail.duplicate_history.map((d) => (
-                      <DuplicateStatusBadge key={d.candidate_id} status={d.status as any} />
-                    ))}
-                  </div>
+              ) : (
+                <div className="flex h-64 w-44 items-center justify-center rounded-xl border border-border bg-muted">
+                  <ImageOff className="h-10 w-10 text-muted-foreground/40" />
                 </div>
               )}
               {detail.image_url && (
@@ -140,12 +120,71 @@ function CardDetailDrawer({ cropId, onClose }: { cropId: number; onClose: () => 
                   href={detail.image_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="mt-auto inline-flex items-center gap-2 text-caption font-medium text-muted-foreground hover:text-primary transition-colors"
+                  className="flex items-center justify-center gap-1.5 rounded-lg border border-border bg-muted/60 px-2.5 py-1.5 text-caption font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-primary"
                 >
-                  <ExternalLink className="h-3.5 w-3.5" />
+                  <ExternalLink className="h-3 w-3" />
                   Open full image
                 </a>
               )}
+            </div>
+
+            {/* ── Right: metadata column ── */}
+            <div className="flex min-w-0 flex-1 flex-col divide-y divide-border rounded-xl border border-border bg-muted/30 overflow-hidden">
+              {/* Status */}
+              <div className="flex items-center justify-between px-3.5 py-2.5">
+                <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Status</span>
+                <ScanStatusBadge status={detail.status} />
+              </div>
+
+              {/* Side */}
+              <div className="flex items-center justify-between px-3.5 py-2.5">
+                <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Side</span>
+                <span className="text-body font-medium text-primary capitalize">{detail.side}</span>
+              </div>
+
+              {/* Batch */}
+              <div className="flex items-center justify-between px-3.5 py-2.5">
+                <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Batch</span>
+                <span className="rounded-md bg-muted px-2 py-0.5 font-mono text-caption text-primary">#{detail.batch_id}</span>
+              </div>
+
+              {/* Rotation confirmed */}
+              <div className="flex items-center justify-between px-3.5 py-2.5">
+                <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Rotation confirmed</span>
+                <span className="text-body font-medium text-primary">
+                  {detail.rotation_confirmed_at
+                    ? new Date(detail.rotation_confirmed_at).toLocaleDateString()
+                    : 'Not yet'}
+                </span>
+              </div>
+
+              {/* Aspect ratio */}
+              {detail.aspect_ratio_ok != null && (
+                <div className="flex items-center justify-between px-3.5 py-2.5">
+                  <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Aspect ratio</span>
+                  <Badge variant={detail.aspect_ratio_ok ? 'mint' : 'rose'}>
+                    {detail.aspect_ratio_ok ? 'OK' : 'Out of tolerance'}
+                  </Badge>
+                </div>
+              )}
+
+              {/* Duplicate flags */}
+              {detail.duplicate_history?.length > 0 && (
+                <div className="flex flex-col gap-1 px-3.5 py-2.5">
+                  <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Duplicate flags</span>
+                  <div className="flex flex-wrap gap-1 pt-0.5">
+                    {detail.duplicate_history.map((d) => (
+                      <DuplicateStatusBadge key={d.candidate_id} status={d.status as any} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Filename */}
+              <div className="flex flex-col gap-1 px-3.5 py-2.5">
+                <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Filename</span>
+                <p className="break-all text-body text-primary leading-snug">{detail.original_filename}</p>
+              </div>
             </div>
           </div>
         ) : null}
@@ -153,6 +192,7 @@ function CardDetailDrawer({ cropId, onClose }: { cropId: number; onClose: () => 
     </Dialog>
   )
 }
+
 
 export function CardLogPage() {
   const [search, setSearch] = useState('')
@@ -228,10 +268,9 @@ export function CardLogPage() {
           className="max-w-xs"
         />
 
-        <select
-          value={batchFilter ?? ''}
+        <FilterSelect
+          value={batchFilter?.toString() ?? ''}
           onChange={(e) => setBatchFilter(e.target.value ? Number(e.target.value) : undefined)}
-          className={selectClass}
         >
           <option value="">All Batches</option>
           {batches?.map((b) => (
@@ -239,18 +278,17 @@ export function CardLogPage() {
               {b.source_label ?? `Batch #${b.id}`}
             </option>
           ))}
-        </select>
+        </FilterSelect>
 
-        <select
+        <FilterSelect
           value={statusFilter ?? ''}
           onChange={(e) => setStatusFilter(e.target.value || undefined)}
-          className={selectClass}
         >
           <option value="">All Statuses</option>
           <option value="pending">Pending</option>
           <option value="cropped">Cropped</option>
           <option value="crop_failed">Crop Failed</option>
-        </select>
+        </FilterSelect>
       </Toolbar>
 
       {/* Card count */}

@@ -47,6 +47,9 @@ def _hash_crop(card_crop_id: int) -> None:
         crop.hash_180, crop.color_sig_180 = results[180]
         crop.hash_270, crop.color_sig_270 = results[270]
         db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 

@@ -22,8 +22,10 @@ class CardCrop(Base):
     aspect_ratio_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     rotation_degrees: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Indexed: the rotation-review queue filters on "IS NULL" across every
+    # cropped scan (app.api.rotation._next_pending / queue_count).
     rotation_confirmed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        DateTime(timezone=True), nullable=True, index=True
     )
 
     hash_0: Mapped[str | None] = mapped_column(String, nullable=True)

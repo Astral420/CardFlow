@@ -16,7 +16,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import storage
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user_optional, require_reviewer
 from app.batch_status import refresh_batch_status
 from app.db import get_db
 from app.models import (
@@ -46,6 +46,47 @@ from app.vision.hashing import decode_image, encode_jpeg, rotate_image
 router = APIRouter(prefix="/api/batches", tags=["batches"])
 
 
+class _FlushableZipStream:
+    """Minimal write-only, non-seekable file-like object for zipfile.
+
+    zipfile.ZipFile checks for a working .seek() and falls back to writing
+    a data descriptor after each entry instead of patching its local file
+    header in place when the target isn't seekable -- which is exactly
+    what lets us hand bytes to the client as they're produced rather than
+    only after the whole archive is built. Deliberately has no .seek
+    attribute at all so zipfile's AttributeError-based feature check finds
+    it non-seekable rather than raising at request time.
+    """
+
+    def __init__(self) -> None:
+        self._buffer = bytearray()
+        self._pos = 0
+
+    def write(self, data: bytes) -> int:
+        self._buffer += data
+        self._pos += len(data)
+        return len(data)
+
+    def tell(self) -> int:
+        return self._pos
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        # zipfile doesn't call this for an externally-provided file-like
+        # object (only for paths it opened itself), but implementing it
+        # keeps this a fully well-behaved writable-file object rather than
+        # one that happens to work because of that specific code path.
+        pass
+
+    def take(self) -> bytes:
+        """Return and clear whatever has been written since the last take()."""
+        data = bytes(self._buffer)
+        self._buffer.clear()
+        return data
+
+
 def _natural_sort_key(filename: str, side: str) -> tuple:
     """Sort key that orders by card stem numerically then front before back.
 
@@ -68,7 +109,7 @@ def _natural_sort_key(filename: str, side: str) -> tuple:
 def list_batches(
     limit: int = Query(default=50, le=200),
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(get_current_user_optional),
 ) -> list[Batch]:
     return db.query(Batch).order_by(Batch.created_at.desc()).limit(limit).all()
 
@@ -80,7 +121,7 @@ async def upload_batch(
     file: UploadFile = File(...),
     source_label: str | None = Form(default=None),
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(require_reviewer),
 ) -> BatchCreateResponse:
     if not file.filename or not file.filename.lower().endswith(".zip"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Expected a .zip file")
@@ -151,7 +192,9 @@ def _batch_counts(db: Session, batch_id: int) -> BatchCountsOut:
 
 @router.get("/{batch_id}", response_model=BatchDetailOut)
 def get_batch(
-    batch_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user)
+    batch_id: int,
+    db: Session = Depends(get_db),
+    _user=Depends(get_current_user_optional),
 ) -> BatchDetailOut:
     batch = db.get(Batch, batch_id)
     if batch is None:
@@ -171,7 +214,9 @@ def get_batch(
 
 @router.get("/{batch_id}/scans", response_model=list[RawScanOut])
 def get_batch_scans(
-    batch_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user)
+    batch_id: int,
+    db: Session = Depends(get_db),
+    _user=Depends(get_current_user_optional),
 ) -> list[RawScanOut]:
     scans = (
         db.query(RawScan)
@@ -220,7 +265,7 @@ def get_batch_scans(
 
 @router.post("/{batch_id}/force-advance", response_model=BatchDetailOut)
 def force_advance_batch(
-    batch_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user)
+    batch_id: int, db: Session = Depends(get_db), _user=Depends(require_reviewer)
 ) -> BatchDetailOut:
     """Mark all stuck 'pending' scans as crop_failed and recompute batch status.
 
@@ -261,7 +306,7 @@ def force_advance_batch(
 
 @router.get("/{batch_id}/export")
 def export_batch_zip(
-    batch_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user)
+    batch_id: int, db: Session = Depends(get_db), _user=Depends(require_reviewer)
 ) -> StreamingResponse:
     """Stream a ZIP of all cropped card images for the batch, with rotation applied."""
     batch = db.get(Batch, batch_id)
@@ -319,8 +364,17 @@ def export_batch_zip(
     )
 
     def generate_zip():
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        # zipfile writes sequentially and only needs .write()/.tell() to
+        # work; it doesn't need to seek backwards as long as it detects the
+        # stream isn't seekable (no .seek attribute here), in which case it
+        # writes a trailing data descriptor instead of patching the local
+        # file header in place. That lets us flush each entry's bytes out
+        # to the client as soon as it's written, instead of building the
+        # whole archive in a BytesIO before sending anything -- a batch of
+        # 200 cards at ~300KB each no longer means ~60MB held in memory for
+        # one request, just one entry's worth at a time.
+        stream = _FlushableZipStream()
+        with zipfile.ZipFile(stream, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
             for r2_key, rotation_degrees, original_filename, side_value in entries:
                 try:
                     img_bytes = storage.download_bytes(r2_key)
@@ -341,8 +395,14 @@ def export_batch_zip(
                 filename = f"{stem}_{side_value}.jpg"
                 zf.writestr(filename, img_bytes)
 
-        buf.seek(0)
-        yield from buf
+                chunk = stream.take()
+                if chunk:
+                    yield chunk
+
+        # Central directory (and anything else written on __exit__)
+        trailing = stream.take()
+        if trailing:
+            yield trailing
 
     label = batch.source_label or f"batch_{batch_id}"
     safe_label = "".join(c if c.isalnum() or c in "-_ " else "_" for c in label).strip()
@@ -357,7 +417,9 @@ def export_batch_zip(
 
 @router.get("/{batch_id}/duplicates", response_model=list[BatchDuplicatePairOut])
 def get_batch_duplicates(
-    batch_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user)
+    batch_id: int,
+    db: Session = Depends(get_db),
+    _user=Depends(get_current_user_optional),
 ) -> list[BatchDuplicatePairOut]:
     """Return all confirmed-duplicate pairs for a batch with image URLs and scores."""
     batch = db.get(Batch, batch_id)

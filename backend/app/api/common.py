@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app import storage
 from app.models import CardCrop, RawScan, ScanSide
-from app.naming import pairing_key
+from app.naming import pairing_key as compute_pairing_key
 from app.schemas import CardPairOut, CropQueueItemOut
 
 
@@ -29,17 +29,23 @@ def crop_item(crop: CardCrop) -> CropQueueItemOut:
 
 
 def find_sibling_crop(db: Session, crop: CardCrop) -> CardCrop | None:
+    """Find the other side (front<->back) of the same physical card.
+
+    Uses the indexed (batch_id, pairing_key) column on RawScan rather than
+    loading every crop in the batch and linear-scanning for a filename
+    match -- that pattern was an N+1 query on batch detail pages (one full
+    batch load per card shown).
+    """
     raw_scan = crop.raw_scan
-    key = pairing_key(raw_scan.original_filename)
-    candidates = (
+    return (
         db.query(CardCrop)
         .join(RawScan)
-        .filter(RawScan.batch_id == raw_scan.batch_id, RawScan.id != raw_scan.id)
-        .all()
-    )
-    return next(
-        (c for c in candidates if pairing_key(c.raw_scan.original_filename) == key),
-        None,
+        .filter(
+            RawScan.batch_id == raw_scan.batch_id,
+            RawScan.pairing_key == raw_scan.pairing_key,
+            RawScan.side != raw_scan.side,
+        )
+        .first()
     )
 
 
@@ -51,7 +57,7 @@ def card_pair(db: Session, crop: CardCrop) -> CardPairOut:
     back = crop if raw_scan.side == ScanSide.back else sibling
 
     return CardPairOut(
-        pairing_key=pairing_key(raw_scan.original_filename),
+        pairing_key=compute_pairing_key(raw_scan.original_filename),
         front=crop_item(front) if front else None,
         back=crop_item(back) if back else None,
     )

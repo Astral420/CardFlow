@@ -7,13 +7,23 @@ as a duplicate-detection filename tiebreaker.
 """
 
 import re
+from typing import TYPE_CHECKING
 
-from app.models import ScanSide
+if TYPE_CHECKING:
+    from app.models import ScanSide
 
 _SIDE_RE = re.compile(r"^(?P<stem>.+)-(?P<side>front|back)\.[^.]+$", re.IGNORECASE)
 
 
-def parse_side(filename: str) -> ScanSide | None:
+def parse_side(filename: str) -> "ScanSide | None":
+    # Local import: RawScan computes pairing_key() (below) on insert/update,
+    # so app.models.raw_scan imports this module at load time. Importing
+    # ScanSide at module level here would close a circular import loop
+    # (app.models -> raw_scan -> app.naming -> app.models). parse_side is
+    # only called at runtime, well after app.models has finished loading,
+    # so a local import here is safe.
+    from app.models import ScanSide
+
     match = _SIDE_RE.match(filename)
     if not match:
         return None

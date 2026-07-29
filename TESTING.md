@@ -78,7 +78,7 @@ backend/.venv/Scripts/python -c "import os; os.chdir('backend'); from alembic.co
 
 ```bash
 cd backend
-../backend/.venv/Scripts/python scripts/seed_users.py "YourName" admin
+../backend/.venv/Scripts/python scripts/seed_users.py "Astral" admin
 cd ..
 ```
 

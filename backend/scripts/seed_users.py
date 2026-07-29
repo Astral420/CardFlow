@@ -1,4 +1,11 @@
-"""One-off helper to create/update the two known users.
+"""One-off helper to create/update a shared-passcode user -- most commonly
+the initial seeded Admin account.
+
+Accounts created here have no individual password and authenticate with
+the shared APP_PASSCODE (see app.api.auth.login). To create a Reviewer
+account with its own password, use the in-app admin user management UI
+(Settings page, as an Admin) instead -- this script is only for
+bootstrapping/breaking-glass access.
 
 Usage (from the backend/ directory):
     python scripts/seed_users.py "Alice" admin

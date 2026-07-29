@@ -47,6 +47,14 @@ const STATUS_DOT_CLASS: Record<BatchStatus, string> = {
   complete: 'bg-accent-mint-solid',
 }
 
+const STATUS_PROGRESS_CLASS: Record<BatchStatus, string> = {
+  extracting: 'bg-accent-peach-solid',
+  cropping: 'bg-accent-blue-solid',
+  rotation_review: 'bg-accent-lavender-solid',
+  duplicate_review: 'bg-accent-lavender-solid',
+  complete: 'bg-accent-mint-solid',
+}
+
 function progressForStatus(status: BatchStatus) {
   return status === 'complete' ? 100 :
     status === 'duplicate_review' ? 80 :
@@ -82,7 +90,7 @@ function BatchCard({ batch }: { batch: Batch }) {
               <span className="text-caption text-muted-foreground">Pipeline progress</span>
               <span className="text-caption font-medium text-primary">{progressValue}%</span>
             </div>
-            <ProgressBar value={progressValue} />
+            <ProgressBar value={progressValue} barClassName={STATUS_PROGRESS_CLASS[batch.status]} />
           </div>
           <div className="flex items-center gap-1 text-caption text-muted-foreground">
             <span>ID: {batch.id}</span>
@@ -105,16 +113,22 @@ function KanbanCard({ batch }: { batch: Batch }) {
         initial={{ opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.15 }}
-        className="group cursor-pointer rounded-lg border border-border bg-surface p-3 transition-all duration-150 hover:-translate-y-px hover:border-primary/15 hover:shadow-soft"
+        className="group cursor-pointer rounded-lg border border-border bg-surface p-3.5 shadow-soft transition-all duration-150 hover:-translate-y-0.5 hover:border-primary/20 hover:shadow-float"
       >
+        {/* Title row */}
         <div className="flex items-start justify-between gap-2">
-          <p className="truncate text-body font-medium text-primary">
+          <p className="truncate text-body font-semibold text-primary">
             {batch.source_label ?? `Batch #${batch.id}`}
           </p>
           <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
         </div>
-        <div className="mt-1.5 flex items-center justify-between text-caption text-muted-foreground">
-          <span>ID: {batch.id}</span>
+
+        {/* Divider */}
+        <div className="my-2.5 border-t border-border" />
+
+        {/* Metadata row */}
+        <div className="flex items-center justify-between text-caption text-muted-foreground">
+          <span className="font-medium">ID: {batch.id}</span>
           <span>{date}</span>
         </div>
       </motion.div>
@@ -126,21 +140,26 @@ function KanbanColumn({ status, batches }: { status: BatchStatus; batches: Batch
   const meta = BATCH_STATUS_META[status]
 
   return (
-    <div className="flex w-[280px] shrink-0 flex-col rounded-xl border border-border bg-muted/40">
-      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5">
+    <div className="flex w-[288px] shrink-0 flex-col rounded-xl border border-border bg-background">
+      {/* Column header */}
+      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
         <div className="flex items-center gap-2 min-w-0">
-          <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', STATUS_DOT_CLASS[status])} />
-          <p className="truncate text-card-title text-primary">{meta.label}</p>
+          <span className={cn('h-2 w-2 shrink-0 rounded-full', STATUS_DOT_CLASS[status])} />
+          <p className="truncate text-card-title font-semibold text-primary">{meta.label}</p>
         </div>
-        <span className="shrink-0 rounded-full bg-surface px-1.5 py-0.5 text-caption font-semibold text-muted-foreground">
+        <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-caption font-semibold text-muted-foreground">
           {batches.length}
         </span>
       </div>
-      <div className="max-h-[calc(100vh-260px)] flex-1 space-y-2 overflow-y-auto p-2.5">
+
+      {/* Card list */}
+      <div className="max-h-[calc(100vh-260px)] flex-1 overflow-y-auto p-3">
         {batches.length === 0 ? (
-          <p className="px-1 py-4 text-center text-caption text-muted-foreground/70">No batches</p>
+          <p className="px-2 py-6 text-center text-caption text-muted-foreground/60">No batches</p>
         ) : (
-          batches.map((b) => <KanbanCard key={b.id} batch={b} />)
+          <div className="flex flex-col gap-2.5">
+            {batches.map((b) => <KanbanCard key={b.id} batch={b} />)}
+          </div>
         )}
       </div>
     </div>
@@ -149,7 +168,7 @@ function KanbanColumn({ status, batches }: { status: BatchStatus; batches: Batch
 
 function BatchKanbanBoard({ batches }: { batches: Batch[] }) {
   return (
-    <div className="flex gap-3 overflow-x-auto pb-2">
+    <div className="flex gap-4 overflow-x-auto pb-4">
       {PIPELINE_COLUMNS.map((status) => (
         <KanbanColumn
           key={status}
@@ -164,11 +183,24 @@ function BatchKanbanBoard({ batches }: { batches: Batch[] }) {
 export function BatchesPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<BatchStatus | 'all'>('all')
-  const [view, setView] = useState<'grid' | 'kanban'>('grid')
+  const [view, setView] = useState<'grid' | 'kanban'>(() => {
+    const stored = localStorage.getItem('batches-view')
+    return stored === 'kanban' ? 'kanban' : 'grid'
+  })
+
+  function handleSetView(v: 'grid' | 'kanban') {
+    localStorage.setItem('batches-view', v)
+    setView(v)
+  }
 
   const { data: batches, isLoading } = useQuery({
     queryKey: ['batches'],
     queryFn: () => listBatches(100),
+    refetchInterval: (query) => {
+      const list = query.state.data ?? []
+      const hasActive = list.some((b) => b.status === 'extracting' || b.status === 'cropping')
+      return hasActive ? 3000 : false
+    },
   })
 
   const matchesSearch = (b: Batch) =>
@@ -220,7 +252,7 @@ export function BatchesPage() {
                   className={cn(
                     'rounded-full px-2.5 py-1 text-caption font-medium transition-colors duration-150',
                     statusFilter === f.value
-                      ? 'bg-primary text-primary-foreground'
+                      ? 'bg-interactive text-interactive-text'
                       : 'text-muted-foreground hover:bg-muted hover:text-primary'
                   )}
                 >
@@ -239,7 +271,7 @@ export function BatchesPage() {
             variant={view === 'grid' ? 'subtle' : 'ghost'}
             active={view === 'grid'}
             className="h-8 w-8"
-            onClick={() => setView('grid')}
+            onClick={() => handleSetView('grid')}
           >
             <LayoutGrid className="h-4 w-4" />
           </IconButton>
@@ -248,7 +280,7 @@ export function BatchesPage() {
             variant={view === 'kanban' ? 'subtle' : 'ghost'}
             active={view === 'kanban'}
             className="h-8 w-8"
-            onClick={() => setView('kanban')}
+            onClick={() => handleSetView('kanban')}
           >
             <Columns className="h-4 w-4" />
           </IconButton>

@@ -1,10 +1,9 @@
-import { useState, useRef, useEffect } from 'react'
-import { createPortal } from 'react-dom'
+import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, ImageOff, Maximize2, ExternalLink, Download, AlertTriangle,
-  Loader2, Images, Copy, CheckCircle2, ArrowRight, ZoomIn, ZoomOut, X,
+  Loader2, Images, Copy, CheckCircle2, ArrowRight,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -20,32 +19,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import { RotatedImage, FullscreenLightbox } from '@/components/shared/image-lightbox'
+import { useAuth } from '@/lib/auth'
 import type { BatchDuplicatePair, RawScan } from '@/lib/types'
-
-// --- Shared helpers ---
-
-function RotatedImage({
-  src,
-  alt,
-  rotationDegrees,
-  className = '',
-}: {
-  src: string
-  alt: string
-  rotationDegrees: number
-  className?: string
-}) {
-  return (
-    <div className={`overflow-hidden flex items-center justify-center bg-muted ${className}`}>
-      <img
-        src={src}
-        alt={alt}
-        className="h-full w-full object-contain"
-        style={{ transform: rotationDegrees ? `rotate(${rotationDegrees}deg)` : undefined }}
-      />
-    </div>
-  )
-}
 
 // --- All-Scans tab ---
 
@@ -74,105 +50,36 @@ function ScanThumbnail({ scan, onClick }: { scan: RawScan; onClick: () => void }
           <ImageOff className="h-8 w-8 text-muted-foreground/40" />
         </div>
       )}
+
+      {/* Hover overlay */}
       <div className="absolute inset-0 flex items-center justify-center bg-primary/60 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
         <Maximize2 className="h-6 w-6 text-white" />
       </div>
+
+      {/* Filename tooltip bar */}
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-primary/80 to-transparent p-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
         <p className="truncate text-caption font-medium text-white">{scan.original_filename}</p>
       </div>
-      <div className="absolute right-2 top-2 flex flex-col items-end gap-1">
-        <Badge variant={scan.side === 'front' ? 'blue' : 'neutral'} className="text-[10px]">
+
+      {/* Side chip — top-right */}
+      <div className="absolute right-3 top-3 pointer-events-none select-none">
+        <span className="inline-flex items-center rounded-md bg-slate-950/80 px-2 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-wider leading-none text-slate-200 backdrop-blur-md border border-slate-700/60 shadow-md">
           {scan.side}
-        </Badge>
-        {scan.is_duplicate && (
-          <Badge variant="rose" className="text-[10px]">
-            Duplicate
-          </Badge>
-        )}
+        </span>
       </div>
+
+      {/* Duplicate chip — top-left */}
+      {scan.is_duplicate && (
+        <div className="absolute left-3 top-3 pointer-events-none select-none">
+          <span className="inline-flex items-center rounded-md bg-slate-950/80 px-2 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-wider leading-none text-accent-rose-solid backdrop-blur-md border border-slate-700/60 shadow-md">
+            Dup
+          </span>
+        </div>
+      )}
     </motion.div>
   )
 }
 
-function FullscreenLightbox({
-  isOpen,
-  onClose,
-  src,
-  alt,
-  rotationDegrees,
-}: {
-  isOpen: boolean
-  onClose: () => void
-  src: string
-  alt: string
-  rotationDegrees: number
-}) {
-  const [scale, setScale] = useState(1)
-  const containerRef = useRef<HTMLDivElement>(null)
-
-  // Reset scale when opened
-  useEffect(() => {
-    if (isOpen) setScale(1)
-  }, [isOpen])
-
-  if (typeof document === 'undefined') return null
-
-  return createPortal(
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[100] flex flex-col bg-black/95 backdrop-blur-sm pointer-events-auto"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="absolute right-4 top-4 z-10">
-            <button 
-              onClick={onClose} 
-              className="rounded-full p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-            >
-              <X className="h-6 w-6" />
-            </button>
-          </div>
-          <div ref={containerRef} className="relative flex flex-1 items-center justify-center overflow-hidden">
-            <motion.img
-              src={src}
-              alt={alt}
-              drag
-              dragConstraints={containerRef}
-              dragElastic={0.2}
-              className="max-h-[85vh] max-w-[90vw] cursor-grab object-contain active:cursor-grabbing"
-              animate={{ scale, rotate: rotationDegrees || 0 }}
-              transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            />
-            <div className="absolute bottom-8 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-xl bg-white/10 p-2 backdrop-blur-md">
-              <button 
-                onClick={() => setScale(s => Math.max(0.5, s - 0.5))}
-                className="rounded-lg p-2 text-white transition-colors hover:bg-white/20 disabled:opacity-50"
-                disabled={scale <= 0.5}
-              >
-                <ZoomOut className="h-5 w-5" />
-              </button>
-              <span className="w-12 text-center text-xs font-semibold text-white">
-                {Math.round(scale * 100)}%
-              </span>
-              <button 
-                onClick={() => setScale(s => Math.min(4, s + 0.5))}
-                className="rounded-lg p-2 text-white transition-colors hover:bg-white/20 disabled:opacity-50"
-                disabled={scale >= 4}
-              >
-                <ZoomIn className="h-5 w-5" />
-              </button>
-            </div>
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>,
-    document.body
-  )
-}
 
 function InspectorDrawer({ scan, onClose }: { scan: RawScan; onClose: () => void }) {
   const [isLightboxOpen, setIsLightboxOpen] = useState(false)
@@ -186,69 +93,89 @@ function InspectorDrawer({ scan, onClose }: { scan: RawScan; onClose: () => void
         description={`Scan #${scan.id} \u2014 ${scan.side} face`}
         className="max-w-2xl"
       >
-        <div className="flex gap-6">
-          {scan.thumbnail_url ? (
-            <div 
-              className="group relative h-64 w-44 shrink-0 cursor-pointer overflow-hidden rounded-xl border border-border"
-              onClick={() => setIsLightboxOpen(true)}
-            >
-              <RotatedImage
-                src={scan.thumbnail_url}
-                alt={scan.original_filename}
-                rotationDegrees={scan.rotation_degrees}
-                className="h-full w-full"
-              />
-              <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all group-hover:bg-black/20 group-hover:opacity-100">
-                <div className="rounded-full bg-white/90 p-2 text-primary shadow-sm">
-                  <Maximize2 className="h-5 w-5" />
+        <div className="flex gap-5">
+          {/* ── Left: image panel ── */}
+          <div className="flex shrink-0 flex-col gap-2">
+            {scan.thumbnail_url ? (
+              <button
+                type="button"
+                onClick={() => setIsLightboxOpen(true)}
+                className="group relative h-64 w-44 overflow-hidden rounded-xl border border-border bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border"
+                aria-label="Open full image"
+              >
+                <RotatedImage
+                  src={scan.thumbnail_url}
+                  alt={scan.original_filename}
+                  rotationDegrees={scan.rotation_degrees}
+                  className="h-full w-full"
+                />
+                {/* Zoom overlay */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-primary/0 opacity-0 transition-all duration-200 group-hover:bg-primary/40 group-hover:opacity-100">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-surface/90 shadow-float backdrop-blur-sm">
+                    <Maximize2 className="h-4 w-4 text-primary" />
+                  </div>
+                  <span className="text-[10px] font-semibold text-white drop-shadow">Expand</span>
                 </div>
-              </div>
-            </div>
-          ) : (
-            <div className="flex h-64 w-44 shrink-0 items-center justify-center rounded-xl border border-border bg-muted">
-              <ImageOff className="h-10 w-10 text-muted-foreground/40" />
-            </div>
-          )}
-          <div className="flex flex-1 flex-col gap-3">
-            <div className="space-y-1">
-              <SectionLabel>Status</SectionLabel>
-              <ScanStatusBadge status={scan.status} />
-            </div>
-            {scan.is_duplicate && (
-              <div className="space-y-1">
-                <SectionLabel>Duplicate</SectionLabel>
-                <Badge variant="rose">Confirmed Duplicate</Badge>
+              </button>
+            ) : (
+              <div className="flex h-64 w-44 items-center justify-center rounded-xl border border-border bg-muted">
+                <ImageOff className="h-10 w-10 text-muted-foreground/40" />
               </div>
             )}
-            <div className="space-y-1">
-              <SectionLabel>Side</SectionLabel>
-              <Badge variant={scan.side === 'front' ? 'blue' : 'neutral'}>{scan.side}</Badge>
-            </div>
-            <div className="space-y-1">
-              <SectionLabel>Filename</SectionLabel>
-              <p className="break-all text-body text-primary">{scan.original_filename}</p>
-            </div>
-            {scan.rotation_degrees !== 0 && (
-              <div className="space-y-1">
-                <SectionLabel>Rotation</SectionLabel>
-                <p className="text-body text-primary">{scan.rotation_degrees}\u00b0</p>
-              </div>
-            )}
-            <div className="space-y-1">
-              <SectionLabel>Scan ID</SectionLabel>
-              <p className="text-body text-primary">#{scan.id}</p>
-            </div>
             {scan.thumbnail_url && (
               <a
                 href={scan.thumbnail_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-auto inline-flex items-center gap-2 text-caption font-medium text-muted-foreground hover:text-primary transition-colors"
+                className="flex items-center justify-center gap-1.5 rounded-lg border border-border bg-muted/60 px-2.5 py-1.5 text-caption font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-primary"
               >
-                <ExternalLink className="h-3.5 w-3.5" />
+                <ExternalLink className="h-3 w-3" />
                 Open full image
               </a>
             )}
+          </div>
+
+          {/* ── Right: metadata column ── */}
+          <div className="flex min-w-0 flex-1 flex-col divide-y divide-border rounded-xl border border-border bg-muted/30 overflow-hidden">
+            {/* Status */}
+            <div className="flex items-center justify-between px-3.5 py-2.5">
+              <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Status</span>
+              <ScanStatusBadge status={scan.status} />
+            </div>
+
+            {/* Side */}
+            <div className="flex items-center justify-between px-3.5 py-2.5">
+              <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Side</span>
+              <span className="text-body font-medium text-primary capitalize">{scan.side}</span>
+            </div>
+
+            {/* Duplicate flag — only if flagged */}
+            {scan.is_duplicate && (
+              <div className="flex items-center justify-between px-3.5 py-2.5">
+                <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Duplicate</span>
+                <Badge variant="rose">Confirmed</Badge>
+              </div>
+            )}
+
+            {/* Rotation — only if non-zero */}
+            {scan.rotation_degrees !== 0 && (
+              <div className="flex items-center justify-between px-3.5 py-2.5">
+                <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Rotation</span>
+                <span className="text-body font-medium text-primary">{scan.rotation_degrees}°</span>
+              </div>
+            )}
+
+            {/* Scan ID */}
+            <div className="flex items-center justify-between px-3.5 py-2.5">
+              <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Scan ID</span>
+              <span className="rounded-md bg-muted px-2 py-0.5 font-mono text-caption text-primary">#{scan.id}</span>
+            </div>
+
+            {/* Filename — full-width row */}
+            <div className="flex flex-col gap-1 px-3.5 py-2.5">
+              <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Filename</span>
+              <p className="break-all text-body text-primary leading-snug">{scan.original_filename}</p>
+            </div>
           </div>
         </div>
       </DialogContent>
@@ -359,7 +286,7 @@ function DuplicatePairCard({ pair }: { pair: BatchDuplicatePair }) {
             {pair.kept.original_filename}
           </p>
           {pair.kept.rotation_degrees !== 0 && (
-            <p className="text-caption text-muted-foreground">\u21bb {pair.kept.rotation_degrees}\u00b0</p>
+            <p className="text-caption text-muted-foreground">↻ {pair.kept.rotation_degrees}°</p>
           )}
         </div>
 
@@ -391,7 +318,7 @@ function DuplicatePairCard({ pair }: { pair: BatchDuplicatePair }) {
             {pair.removed.original_filename}
           </p>
           {pair.removed.rotation_degrees !== 0 && (
-            <p className="text-caption text-muted-foreground">\u21bb {pair.removed.rotation_degrees}\u00b0</p>
+            <p className="text-caption text-muted-foreground">↻ {pair.removed.rotation_degrees}°</p>
           )}
         </div>
       </div>
@@ -436,6 +363,7 @@ type TabId = 'scans' | 'duplicates'
 export function BatchDetailPage() {
   const { id } = useParams<{ id: string }>()
   const batchId = Number(id)
+  const { canEdit } = useAuth()
   const [selectedScan, setSelectedScan] = useState<RawScan | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
   const [isExporting, setIsExporting] = useState(false)
@@ -446,12 +374,19 @@ export function BatchDetailPage() {
     queryKey: ['batch', batchId],
     queryFn: () => getBatch(batchId),
     enabled: !!batchId,
+    refetchInterval: (query) => {
+      const b = query.state.data
+      return b && (b.status === 'extracting' || b.status === 'cropping') ? 2500 : false
+    },
   })
 
   const { data: scans, isLoading: scansLoading } = useQuery({
     queryKey: ['batch-scans', batchId],
     queryFn: () => getBatchScans(batchId),
     enabled: !!batchId,
+    refetchInterval: () => {
+      return batch && (batch.status === 'extracting' || batch.status === 'cropping') ? 2500 : false
+    },
   })
 
   const { data: duplicates, isLoading: duplicatesLoading } = useQuery({
@@ -481,13 +416,23 @@ export function BatchDetailPage() {
     }
   }
 
-  const progressValue =
-    !batch ? 0 :
-      batch.status === 'complete' ? 100 :
-        batch.status === 'duplicate_review' ? 80 :
-          batch.status === 'rotation_review' ? 60 :
-            batch.status === 'cropping' ? 40 :
-              batch.status === 'extracting' ? 20 : 0
+  let progressValue = 0
+  if (batch) {
+    if (batch.status === 'complete') {
+      progressValue = 100
+    } else if (batch.status === 'duplicate_review') {
+      progressValue = 80
+    } else if (batch.status === 'rotation_review') {
+      progressValue = 60
+    } else if (batch.status === 'cropping') {
+      const total = batch.counts.scans
+      const done = batch.counts.cropped + batch.counts.crop_failed
+      const cropRatio = total > 0 ? done / total : 0
+      progressValue = Math.round(40 + cropRatio * 20)
+    } else if (batch.status === 'extracting') {
+      progressValue = 20
+    }
+  }
 
   const showForceAdvance =
     batch?.status === 'cropping' &&
@@ -538,7 +483,7 @@ export function BatchDetailPage() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {hasCroppedImages && (
+              {hasCroppedImages && canEdit && (
                 <Button
                   variant="secondary"
                   size="sm"
@@ -554,7 +499,7 @@ export function BatchDetailPage() {
                   {isExporting ? 'Preparing\u2026' : 'Download ZIP'}
                 </Button>
               )}
-              {showForceAdvance && (
+              {showForceAdvance && canEdit && (
                 <Button
                   variant="secondary"
                   size="sm"
@@ -656,10 +601,7 @@ export function BatchDetailPage() {
                 </span>
               )}
               {activeTab === tab.id && (
-                <motion.div
-                  layoutId="tab-indicator"
-                  className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-primary"
-                />
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-accent-lavender-solid" />
               )}
             </button>
           ))}
@@ -679,7 +621,7 @@ export function BatchDetailPage() {
                   Scans {scans ? `(${scans.length})` : ''}
                   {duplicateCount > 0 && (
                     <span className="ml-2 normal-case font-normal text-muted-foreground/60">
-                      \u2014 {(scans?.filter(s => !s.is_duplicate) ?? []).length} unique, {duplicateCount} duplicate
+                      — {(scans?.filter(s => !s.is_duplicate) ?? []).length} unique, {duplicateCount} duplicate
                     </span>
                   )}
                 </SectionLabel>

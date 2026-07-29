@@ -54,6 +54,12 @@ def _crop_scan(raw_scan_id: int) -> None:
         )
         refresh_batch_status(db, raw_scan.batch_id)
         db.commit()
+    except Exception:
+        # e.g. storage.upload_bytes() raising after the db.flush() above
+        # left a partial card_crop row staged on this session. Roll it back
+        # explicitly instead of relying on close()'s implicit behavior.
+        db.rollback()
+        raise
     finally:
         db.close()
 

@@ -34,6 +34,9 @@ def _find_duplicates(card_crop_id: int) -> None:
         record_duplicate_candidates(db, crop, hits)
         refresh_batch_status(db, raw_scan.batch_id)
         db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 

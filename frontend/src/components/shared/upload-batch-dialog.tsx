@@ -1,4 +1,4 @@
-import { useRef, useState, type DragEvent } from "react";
+import { cloneElement, isValidElement, useRef, useState, type DragEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { UploadCloud, FileArchive } from "lucide-react";
@@ -7,9 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { uploadBatch, apiErrorMessage } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 export function UploadBatchDialog({ trigger }: { trigger: React.ReactNode }) {
+  const { canEdit } = useAuth();
   const [open, setOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [sourceLabel, setSourceLabel] = useState("");
@@ -43,6 +45,14 @@ export function UploadBatchDialog({ trigger }: { trigger: React.ReactNode }) {
     setIsDragging(false);
     const dropped = e.dataTransfer.files?.[0];
     if (dropped) setFile(dropped);
+  }
+
+  // Guests can view every page this trigger appears on, but can't upload.
+  // Render the same trigger, just inert, rather than wiring up the dialog.
+  if (!canEdit) {
+    return isValidElement(trigger)
+      ? cloneElement(trigger as React.ReactElement<{ disabled?: boolean }>, { disabled: true })
+      : trigger;
   }
 
   return (

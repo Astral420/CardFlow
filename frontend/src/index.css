@@ -5,8 +5,84 @@
 @tailwind utilities;
 
 @layer base {
+  /* ─── Light theme (default) ──────────────────────────────────────────────── */
   :root {
     color-scheme: light;
+
+    --color-background:                 #F5F4FB;
+    --color-surface:                    #FDFCFF;
+    --color-border:                     #E5E3F5;
+
+    --color-primary:                    #1A1730;
+    --color-primary-foreground:         #FFFFFF;
+    --color-muted-foreground:           #6B6887;
+    --color-muted:                      #EEECF8;
+
+    /* Dedicated token for primary action buttons — keeps buttons visually
+       distinct from the text color token in dark mode. */
+    --color-interactive:                #1A1730;
+    --color-interactive-text:           #FFFFFF;
+
+    --color-accent-lavender:            #EEEEFC;
+    --color-accent-lavender-foreground: #5457C6;
+    --color-accent-lavender-solid:      #6366F1;
+
+    --color-accent-blue:                #EAF1FE;
+    --color-accent-blue-foreground:     #2A63C7;
+    --color-accent-blue-solid:          #3B82F6;
+
+    --color-accent-peach:               #FCF1E4;
+    --color-accent-peach-foreground:    #B4702E;
+    --color-accent-peach-solid:         #F0973D;
+
+    --color-accent-mint:                #E8F6EE;
+    --color-accent-mint-foreground:     #227A4C;
+    --color-accent-mint-solid:          #22C55E;
+
+    --color-accent-rose:                #FBEAEA;
+    --color-accent-rose-foreground:     #BE3B3B;
+    --color-accent-rose-solid:          #EF4444;
+  }
+
+  /* ─── Dark theme — anchored to #322B57 ──────────────────────────────────── */
+  /* Background chain: #13102A → #1E1A33 → #322B57 (surface) → #3D3669 (border) */
+  html.dark {
+    color-scheme: dark;
+
+    --color-background:                 #13102A;
+    --color-surface:                    #322B57;
+    --color-border:                     #3D3669;
+
+    --color-primary:                    #EDECFF;
+    --color-primary-foreground:         #13102A;
+    --color-muted-foreground:           #9B98BE;
+    --color-muted:                      #1E1A33;
+
+    /* In dark mode, interactive elements use an indigo accent so they
+       don't inherit the light text color (#EDECFF → washed-out button). */
+    --color-interactive:                #4F46E5;
+    --color-interactive-text:           #FFFFFF;
+
+    /* Accents — same hue family, adjusted for dark readability */
+    --color-accent-lavender:            #1F1C45;
+    --color-accent-lavender-foreground: #A5B4FC;
+    --color-accent-lavender-solid:      #6366F1;
+
+    --color-accent-blue:                #111E3A;
+    --color-accent-blue-foreground:     #93C5FD;
+    --color-accent-blue-solid:          #3B82F6;
+
+    --color-accent-peach:               #2A1C0D;
+    --color-accent-peach-foreground:    #FDBA74;
+    --color-accent-peach-solid:         #F0973D;
+
+    --color-accent-mint:                #0E2319;
+    --color-accent-mint-foreground:     #4ADE80;
+    --color-accent-mint-solid:          #22C55E;
+
+    --color-accent-rose:                #2A1010;
+    --color-accent-rose-foreground:     #FCA5A5;
+    --color-accent-rose-solid:          #EF4444;
   }
 
   * {
@@ -22,14 +98,15 @@
   body {
     @apply bg-background text-primary font-sans text-body antialiased;
     font-feature-settings: "cv11", "ss01";
+    transition: background-color 200ms ease, color 200ms ease;
   }
 
   ::selection {
-    background: #e4e4fb;
+    background: #E2DFFE;
   }
 
   :focus-visible {
-    outline: 2px solid #6366f1;
+    outline: 2px solid #8B87D8;
     outline-offset: 2px;
     border-radius: 6px;
   }
@@ -39,11 +116,17 @@
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: #e2e2df;
+    background: #D5D2EE;
     border-radius: 999px;
   }
+  html.dark ::-webkit-scrollbar-thumb {
+    background: #3D3669;
+  }
   ::-webkit-scrollbar-thumb:hover {
-    background: #d3d3cf;
+    background: #C5C1E5;
+  }
+  html.dark ::-webkit-scrollbar-thumb:hover {
+    background: #4A4480;
   }
   ::-webkit-scrollbar-track {
     background: transparent;

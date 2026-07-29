@@ -7,7 +7,7 @@ from app.models import BatchStatus, DuplicateStatus, ScanSide, ScanStatus, UserR
 
 class LoginRequest(BaseModel):
     name: str
-    passcode: str
+    password: str
 
 
 class TokenResponse(BaseModel):
@@ -20,6 +20,27 @@ class UserOut(BaseModel):
     id: int
     name: str
     role: UserRole
+    created_at: datetime
+
+
+class UserCreateRequest(BaseModel):
+    name: str
+    password: str
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Display name is required")
+        return stripped
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        if len(value) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        return value
 
 
 class BatchOut(BaseModel):
