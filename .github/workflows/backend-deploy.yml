@@ -61,6 +61,9 @@ jobs:
           # the image being deployed.
           ref: ${{ github.event.workflow_run.head_sha }}
 
+      - name: Lowercase GitHub owner
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
+
       - name: Install cloudflared (pin the version — see §4's changelog warning)
         run: |
           curl -L --output cloudflared.deb \
