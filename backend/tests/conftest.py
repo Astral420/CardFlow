@@ -1,15 +1,3 @@
-"""Shared pytest fixtures.
-
-The suite exercises route/dependency functions directly against an
-in-memory sqlite DB rather than spinning up the full app or its external
-services (see test_rbac.py's module docstring). This fixture keeps that
-property true for Redis too: app.token_store (session revocation,
-refresh-token families) is patched to talk to an in-memory fakeredis
-stand-in instead of requiring a real Redis server just to run the tests.
-
-Autouse + session-agnostic on purpose: every test gets a fresh fake Redis,
-even ones that don't touch auth, so nothing can leak state between tests.
-"""
 
 import fakeredis
 import pytest
