@@ -26,10 +26,7 @@ export function setToken(token: string | null) {
 }
 
 export const client = axios.create({
-  baseURL: "/api",
-  // The refresh token travels as an httpOnly cookie (never touches JS) --
-  // this is what makes the browser actually send/accept it on the
-  // /auth/login, /auth/refresh, and /auth/logout calls below.
+  baseURL: import.meta.env.VITE_API_BASE_URL ?? "/api",
   withCredentials: true,
 });
 
