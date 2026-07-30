@@ -1,12 +1,10 @@
-from pathlib import Path
+from io import BytesIO
 
 import cv2
 import numpy as np
 import pytest
 from PIL import Image
 from app.vision.crop import auto_crop
-
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 def _polygon_area(points: list[list[float]]) -> float:
@@ -45,7 +43,17 @@ def test_auto_crop_accepts_card_aspect_ratio():
     image_bytes = _make_scan_bytes(card_w=125, card_h=175, canvas_size=400)
     result = auto_crop(image_bytes)
     assert result.aspect_ratio_ok is True
-    assert result.aspect_ratio == pytest.approx(3.5 / 2.5, rel=0.05)
+    # NOTE: _expanded_box() pads the detected rect by crop_padding_fraction
+    # (a fixed fraction of the *longer* side) equally on width and height.
+    # Adding equal absolute padding to two unequal sides always pulls the
+    # ratio toward 1, so the measured aspect_ratio is expected to sit a bit
+    # below the bare-card ideal of 1.4 -- this isn't measurement noise, it's
+    # the intentional padding margin. At crop_padding_fraction=0.07 the
+    # algebraic skew alone is ~4.7% low; rel=0.1 leaves headroom for that
+    # plus normal contour/JPEG-quantization jitter while still catching a
+    # real regression (production code treats anything outside
+    # aspect_ratio_tolerance=0.15 as failing the check entirely).
+    assert result.aspect_ratio == pytest.approx(3.5 / 2.5, rel=0.1)
 
 
 def test_auto_crop_flags_bad_aspect_ratio():
@@ -111,29 +119,103 @@ def test_auto_crop_keeps_dark_card_border_instead_of_bright_interior():
 
 # --- Regression coverage for the laminated/protector-sleeve glare bug ---
 #
-# These fixtures are real scans of a single laminated card (front + back) shot
-# on a near-black scan bed. The sleeve produces bright glare streaks outside
-# the card's true edges, which previously caused two failure modes depending
-# on tuning:
+# Originally this coverage depended on two real scanned photos of a physical
+# laminated card checked in under tests/fixtures/. Those binary fixtures were
+# never actually committed, which is what you're looking at if you found
+# this comment via a CI failure about missing laminated_card-*.jpg files.
+# Rather than depend on binary photo assets going forward, `_make_laminated_
+# card_bytes()` below synthesizes the same failure signature in code: a
+# near-black scan bed, a card-shaped region, a brighter inset "artwork"
+# panel, and bright glare blobs sitting just outside the card's true edges
+# (simulating sleeve reflection) -- no external files, nothing that can go
+# missing.
+#
+# That signature previously caused two failure modes depending on tuning:
 #   - close_kernel=(9,9) + an Otsu-thresholded mask candidate: Otsu isolated
 #     only the brightest interior artwork panel, producing a tightly zoomed
-#     crop that clipped real card content.
+#     crop that clipped real card content. Otsu was removed as a candidate
+#     source entirely for this reason (see the NOTE in _candidate_contours),
+#     so today that failure mode is guarded structurally rather than by a
+#     numeric race between candidates -- see
+#     test_auto_crop_candidate_contours_never_uses_otsu below.
 #   - close_kernel=(21,21): the larger closing kernel bridged the glare
 #     streaks into the card contour for every mask, producing an
-#     under-cropped image with excess black background on all sides.
+#     under-cropped image with excess black background on all sides. This
+#     one *is* reproduced numerically below (area_fraction climbs from
+#     ~0.133 to ~0.172 with a 21x21 kernel against the same synthetic image),
+#     so the area-band check keeps catching a regression here.
 #
-# Rather than pin exact pixel coordinates (brittle), these tests check two
-# scan-setup-independent invariants: (1) the front and back detections of the
-# same physical card should agree closely, since it's the same rectangle on
-# the same rig, and (2) the detected area should fall within a band wide
-# enough for normal variation but narrow enough to catch either failure mode.
+# Rather than pin exact pixel coordinates (brittle), the two tests below
+# check scan-setup-independent invariants: (1) the front and back detections
+# of the same physical card should agree closely, since it's the same
+# rectangle on the same rig, and (2) the detected area should fall within a
+# band wide enough for normal variation but narrow enough to catch an
+# over-crop (kernel-bridging) or under-crop regression.
 _LAMINATED_AREA_FRACTION_BOUNDS = (0.10, 0.16)
+
+
+def _make_laminated_card_bytes(
+    side: str,
+    canvas_size: int = 1000,
+    card_w: int = 260,
+    card_h: int = 364,
+    bg_val: int = 4,
+    card_val: int = 70,
+    art_val: int = 235,
+    art_margin: int = 20,
+    glare_gap: int = 25,
+    glare_thickness: int = 18,
+) -> bytes:
+    """Synthetic reproduction of a laminated/sleeved card scan.
+
+    Card dimensions keep the true 3.5:2.5 aspect ratio (260 * 1.4 == 364) and
+    are sized so the *expanded* (padded) detection lands mid-band at
+    ~0.133 -- comfortably inside _LAMINATED_AREA_FRACTION_BOUNDS for the
+    current pipeline, while still failing it if the close kernel is widened
+    enough to bridge the glare blobs into the card contour.
+    """
+    rng = np.random.default_rng(0)
+    canvas = np.full((canvas_size, canvas_size, 3), bg_val, dtype=np.uint8)
+    canvas += rng.integers(0, 3, canvas.shape, dtype=np.uint8)  # slight bed noise
+
+    x0 = (canvas_size - card_w) // 2
+    y0 = (canvas_size - card_h) // 2
+    canvas[y0 : y0 + card_h, x0 : x0 + card_w] = card_val
+
+    if side == "front":
+        # photo-like artwork panel: brighter, inset
+        ax0, ay0 = x0 + art_margin, y0 + art_margin
+        ax1, ay1 = x0 + card_w - art_margin, y0 + card_h - art_margin
+        canvas[ay0:ay1, ax0:ax1] = art_val
+    else:
+        # text-block back: slightly less bright, different inset than front
+        m = art_margin + 15
+        ax0, ay0 = x0 + m, y0 + m
+        ax1, ay1 = x0 + card_w - m, y0 + card_h - m
+        canvas[ay0:ay1, ax0:ax1] = art_val - 15
+
+    # Glare blobs just outside the card's true edges, not touching it -- the
+    # gap (25px) is calibrated to survive close_kernel=(9,9)/iterations=2 but
+    # bridge into the card contour under a wider kernel like (21,21).
+    glare_val = 250
+    gx0, gx1 = x0 + 40, x0 + card_w - 40
+    gy1 = y0 - glare_gap
+    gy0 = gy1 - glare_thickness
+    canvas[max(0, gy0) : max(0, gy1), gx0:gx1] = glare_val
+    gy0b, gy1b = y0 + 60, y0 + card_h - 60
+    gx1b = x0 - glare_gap
+    gx0b = gx1b - glare_thickness
+    canvas[gy0b:gy1b, max(0, gx0b) : max(0, gx1b)] = glare_val
+
+    ok, buf = cv2.imencode(".jpg", canvas, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    assert ok
+    return buf.tobytes()
 
 
 @pytest.mark.parametrize("side", ["front", "back"])
 def test_auto_crop_laminated_card_area_within_expected_band(side):
-    image_bytes = (FIXTURES_DIR / f"laminated_card-{side}.jpg").read_bytes()
-    with Image.open(FIXTURES_DIR / f"laminated_card-{side}.jpg") as img:
+    image_bytes = _make_laminated_card_bytes(side)
+    with Image.open(BytesIO(image_bytes)) as img:
         image_area = img.width * img.height
 
     result = auto_crop(image_bytes)
@@ -143,20 +225,20 @@ def test_auto_crop_laminated_card_area_within_expected_band(side):
     assert low <= area_fraction <= high, (
         f"{side} crop covers {area_fraction:.3f} of the scan bed, expected "
         f"between {low} and {high}. Below this band usually means a bright "
-        "interior panel (e.g. an Otsu-style mask) was picked instead of the "
-        "full card; above it usually means glare/background got merged "
-        "into the card contour (e.g. too large a morphological close kernel)."
+        "interior panel was picked instead of the full card; above it "
+        "usually means glare/background got merged into the card contour "
+        "(e.g. too large a morphological close kernel)."
     )
     assert result.aspect_ratio_ok is True
 
 
 def test_auto_crop_laminated_card_front_and_back_are_consistent():
-    front_bytes = (FIXTURES_DIR / "laminated_card-front.jpg").read_bytes()
-    back_bytes = (FIXTURES_DIR / "laminated_card-back.jpg").read_bytes()
+    front_bytes = _make_laminated_card_bytes("front")
+    back_bytes = _make_laminated_card_bytes("back")
 
-    with Image.open(FIXTURES_DIR / "laminated_card-front.jpg") as img:
+    with Image.open(BytesIO(front_bytes)) as img:
         front_area = img.width * img.height
-    with Image.open(FIXTURES_DIR / "laminated_card-back.jpg") as img:
+    with Image.open(BytesIO(back_bytes)) as img:
         back_area = img.width * img.height
 
     front = auto_crop(front_bytes)
@@ -166,9 +248,8 @@ def test_auto_crop_laminated_card_front_and_back_are_consistent():
     back_fraction = _polygon_area(back.bbox) / back_area
 
     # Same physical card, same rig -> detected coverage should agree closely
-    # even though the front (photo art) and back (text block) have very
-    # different content. A content-sensitive mask (Otsu) made this diverge
-    # sharply in the past (~0.02 front vs ~0.09 back on this fixture pair).
+    # even though the front (photo art) and back (text block) have
+    # different content.
     relative_diff = abs(front_fraction - back_fraction) / max(
         front_fraction, back_fraction
     )
@@ -176,6 +257,42 @@ def test_auto_crop_laminated_card_front_and_back_are_consistent():
         f"front area fraction {front_fraction:.3f} vs back {back_fraction:.3f} "
         f"differ by {relative_diff:.1%}, expected close agreement for the "
         "same physical card"
+    )
+
+
+def test_auto_crop_candidate_contours_never_uses_otsu(monkeypatch):
+    """Direct guard for the Otsu failure mode described above.
+
+    Rather than relying on a synthetic image winning a numeric scoring race
+    against Otsu (fragile, and no longer reproducible now that the
+    relative-size penalty fix is also in place -- see _score_contour), this
+    asserts the actual mechanism directly: cv2.threshold is never called
+    with the THRESH_OTSU flag anywhere inside candidate generation. If
+    someone reintroduces an Otsu candidate, this fails immediately and
+    explicitly instead of depending on it also happening to out-score the
+    other candidates on some particular image.
+    """
+    from app.vision import crop as crop_module
+
+    calls: list[int] = []
+    real_threshold = cv2.threshold
+
+    def spy_threshold(src, thresh, maxval, type, **kwargs):  # noqa: A002
+        calls.append(type)
+        return real_threshold(src, thresh, maxval, type, **kwargs)
+
+    monkeypatch.setattr(crop_module.cv2, "threshold", spy_threshold)
+
+    image_bytes = _make_laminated_card_bytes("front")
+    auto_crop(image_bytes)
+
+    assert calls, "expected cv2.threshold to be called at all"
+    assert not any(t & cv2.THRESH_OTSU for t in calls), (
+        "cv2.threshold was called with THRESH_OTSU during candidate "
+        "generation -- Otsu was intentionally removed as a candidate mask "
+        "source (see the NOTE in _candidate_contours) because it isolates "
+        "the brightest interior panel instead of the full card on "
+        "laminated/sleeved scans"
     )
 
 

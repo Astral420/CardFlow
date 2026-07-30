@@ -6,7 +6,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import app.celery_app
 from app.api import auth, batches, cards, duplicates, rotation, users
-
 from app.config import settings
 from app.redis_client import redis_client
 
@@ -24,9 +23,6 @@ async def lifespan(_app: FastAPI):
             "the API."
         )
 
-    # Redis now backs session revocation, not just Celery -- if it's
-    # unreachable, login and token refresh would fail on the first real
-    # request anyway, so fail at startup instead where it's obvious why.
     try:
         redis_client.ping()
     except redis.RedisError as exc:
@@ -43,6 +39,7 @@ app = FastAPI(title="Card Tool API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
+    allow_origin_regex=settings.cors_origin_regex or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
