@@ -5,6 +5,7 @@ import { Settings, LogOut, LogIn, Shield, GitBranch, Users, UserPlus, Trash2, Ch
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAuth } from '@/lib/auth'
 import { listUsers, createUser, deleteUser, apiErrorMessage } from '@/lib/api'
+import { useHealthCheck } from '@/lib/use-health'
 import type { User } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -275,6 +276,7 @@ function UserManagementCard() {
 
 export function SettingsPage() {
   const { user, isAdmin, logout } = useAuth()
+  const { statusText, badgeVariant } = useHealthCheck()
 
   return (
     <div className="space-y-5">
@@ -339,7 +341,7 @@ export function SettingsPage() {
                   { label: 'Application', value: 'CardFlow' },
                   { label: 'Version', value: '1.0.0' },
                   { label: 'API Base', value: '/api' },
-                  { label: 'Status', value: 'Operational', badge: 'mint' as const },
+                  { label: 'Status', value: statusText, badge: badgeVariant },
                 ].map(({ label, value, badge }) => (
                   <div key={label} className="flex items-center justify-between px-4 py-2.5">
                     <span className="text-caption text-muted-foreground">{label}</span>

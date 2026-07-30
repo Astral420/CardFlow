@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: card_tool
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: card_tool
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U card_tool"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  api:
+    image: ghcr.io/${GHCR_OWNER}/cardflow-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: backend/.env.production
+    environment:
+      DATABASE_URL: postgresql+psycopg2://card_tool:${POSTGRES_PASSWORD}@postgres:5432/card_tool
+      REDIS_URL: redis://redis:6379/0
+      REDIS_AUTH_URL: redis://redis:6379/2
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  worker:
+    image: ghcr.io/${GHCR_OWNER}/cardflow-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: backend/.env.production
+    environment:
+      DATABASE_URL: postgresql+psycopg2://card_tool:${POSTGRES_PASSWORD}@postgres:5432/card_tool
+      REDIS_URL: redis://redis:6379/0
+    command: celery -A app.celery_app worker --loglevel=info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+volumes:
+  postgres_data:

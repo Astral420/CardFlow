@@ -10,13 +10,7 @@ class Settings(BaseSettings):
         "postgresql+psycopg2://card_tool:card_tool@localhost:5432/card_tool"
     )
     redis_url: str = "redis://localhost:6379/0"
-    # Celery result backend (separate DB index from the broker above so
-    # results don't collide with queued task messages).
     redis_result_backend_url: str = "redis://localhost:6379/1"
-    # Auth session state (access-token revocation markers, refresh-token
-    # family registry -- see app.token_store). Its own DB index for the
-    # same reason as the result backend: independent of Celery's traffic,
-    # so flushing/inspecting one doesn't touch the others.
     redis_auth_url: str = "redis://localhost:6379/2"
 
     r2_account_id: str = ""
@@ -55,6 +49,7 @@ class Settings(BaseSettings):
     refresh_cookie_domain: str | None = None
 
     cors_origins: list[str] = ["http://localhost:5173"]
+    cors_origin_regex: str = ""
 
     def insecure_defaults(self) -> list[str]:
         """Names of settings still at their placeholder value. Used to fail
