@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { RotateCw, Copy, Upload, ArrowRight, Layers, CheckCircle2, Clock, ChevronRight } from 'lucide-react'
+import { RotateCw, Copy, Upload, ArrowRight, Layers, CheckCircle2, Clock, ChevronRight, AlertCircle } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { listBatches, getRotationQueueCount, getDuplicateQueueCount } from '@/lib/api'
+import { useHealthCheck } from '@/lib/use-health'
 import { StatCard } from '@/components/shared/stat-card'
 import { BatchStatusBadge } from '@/components/shared/status-badge'
 import { UploadBatchDialog } from '@/components/shared/upload-batch-dialog'
@@ -68,6 +69,8 @@ export function DashboardPage() {
     refetchInterval: 15_000,
   })
 
+  const { statusText, isOperational, accent, isLoading } = useHealthCheck()
+
   const rotQ = rotationCount?.count ?? 0
   const dupQ = duplicateCount?.count ?? 0
 
@@ -122,9 +125,17 @@ export function DashboardPage() {
           />
           <StatCard
             label="System"
-            value="Operational"
-            icon={<CheckCircle2 className="h-4 w-4" />}
-            accent="mint"
+            value={statusText}
+            icon={
+              isLoading ? (
+                <Clock className="h-4 w-4" />
+              ) : isOperational ? (
+                <CheckCircle2 className="h-4 w-4" />
+              ) : (
+                <AlertCircle className="h-4 w-4 text-accent-rose-foreground" />
+              )
+            }
+            accent={accent}
           />
         </div>
       </motion.div>

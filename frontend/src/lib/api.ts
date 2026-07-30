@@ -335,3 +335,11 @@ export async function createUser(payload: CreateUserPayload) {
 export async function deleteUser(userId: number) {
   await client.delete(`/users/${userId}`);
 }
+
+// ---- Health check ----
+
+export async function checkHealth() {
+  const { data } = await client.get<{ status: string }>("/health");
+  return data;
+}
+
