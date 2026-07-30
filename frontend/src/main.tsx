@@ -17,6 +17,8 @@ const queryClient = new QueryClient({
   },
 })
 
+// structure
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ThemeProvider>
