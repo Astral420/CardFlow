@@ -39,7 +39,6 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
-    environment: production
     steps:
       - name: Install cloudflared (pin the version — see §4's changelog warning)
         run: |
@@ -80,7 +79,7 @@ jobs:
           R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
           R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
           R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
-          R2_BUCKET_NAME=card-tool
+          R2_BUCKET_NAME=card-dedup-storage
           R2_PUBLIC_BASE_URL=https://media.cardflowtool.tech
           SECRET_KEY=${APP_SECRET_KEY}
           APP_PASSCODE=${APP_PASSCODE}
@@ -95,13 +94,14 @@ jobs:
           scp -F ~/.ssh/config /tmp/compose.env cardflow-vm:~/cardflow/.env
           shred -u /tmp/env.production /tmp/compose.env
 
-      - name: Pull, migrate, restart
+      - name: Pull, migrate, seed admin, restart
         run: |
           ssh cardflow-vm '
             cd ~/cardflow &&
             export IMAGE_TAG=${{ github.sha }} &&
             docker compose -f docker-compose.prod.yml pull &&
             docker compose -f docker-compose.prod.yml run --rm api alembic upgrade head &&
+            docker compose -f docker-compose.prod.yml run --rm api python scripts/seed_users.py "${{ vars.ADMIN_NAME || 'Astral420' }}" admin &&
             docker compose -f docker-compose.prod.yml up -d
           '
 
