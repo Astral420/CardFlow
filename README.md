@@ -42,10 +42,10 @@ By replacing manual OS image viewers and informal spreadsheet tracking, CardFlow
 * **Visual & Quantitative Comparison:** Side-by-side candidate review UI detailing structural distance, HSV color similarity, and scan metadata.
 * **Audited Decision History:** Every duplicate confirmation or rejection records the operator ID, user role, and exact timestamp.
 
-### 🛡️ Enterprise Security & Role-Based Access Control (RBAC)
-* **JWT & Cross-Site Refresh Cookies:** Short-lived JWT access tokens paired with `httpOnly`, `SameSite=none`, `Secure` refresh cookies to prevent XSS credential theft.
-* **Role Hierarchy:** Enforces `admin`, `operator`, and `reviewer` access levels across backend endpoints and frontend components.
-* **Redis Token Revocation & Rate Limiting:** Active token revocation list stored in Redis for instant session termination, alongside Redis sliding-window API rate limiters.
+### 🛡️ Secure User Authentication & Access Controls
+* **Secure Sessions & Token Revocation:** Token-based authentication backed by `httpOnly`, `SameSite=none`, `Secure` refresh cookies and instant Redis session revocation.
+* **Granular Permissions:** Configurable access controls enforcing user permissions across backend endpoints and frontend navigation.
+* **API Rate Limiting:** Sliding-window rate limiting powered by Redis to protect authentication and system endpoints against brute-force abuse.
 
 ### 📊 Modern Web Dashboard
 * **Built with React 18 + Vite:** Fast, responsive UI powered by Tailwind CSS, Radix UI primitives, Lucide icons, and light/dark theme modes.

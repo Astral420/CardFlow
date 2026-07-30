@@ -1,15 +1,3 @@
-"""Regression coverage for the ZIP export memory fix.
-
-generate_zip() used to build the entire archive in a BytesIO before
-sending any bytes to the client (~60MB in memory for a 200-card batch).
-_FlushableZipStream lets zipfile write real bytes out to a client as each
-entry is produced. This test exercises the stream class directly (the way
-export_batch_zip's generate_zip() generator uses it) rather than spinning
-up the full FastAPI route, since the important guarantee -- "the archive
-produced this way is valid and byte-identical in content to a normal
-in-memory zip" -- doesn't depend on the DB/storage plumbing around it.
-"""
-
 import io
 import zipfile
 
