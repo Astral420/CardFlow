@@ -54,6 +54,13 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          # Same commit build-and-push just built and pushed, so
+          # docker-compose.prod.yml (and anything else on disk here) matches
+          # the image being deployed.
+          ref: ${{ github.event.workflow_run.head_sha }}
+
       - name: Install cloudflared (pin the version — see §4's changelog warning)
         run: |
           curl -L --output cloudflared.deb \
@@ -106,6 +113,7 @@ jobs:
           EOF
           scp -F ~/.ssh/config /tmp/env.production cardflow-vm:~/cardflow/backend/.env.production
           scp -F ~/.ssh/config /tmp/compose.env cardflow-vm:~/cardflow/.env
+          scp -F ~/.ssh/config docker-compose.prod.yml cardflow-vm:~/cardflow/docker-compose.prod.yml
           shred -u /tmp/env.production /tmp/compose.env
 
       - name: Pull, migrate, seed admin, restart
