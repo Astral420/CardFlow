@@ -11,7 +11,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -46,45 +46,6 @@ from app.vision.hashing import decode_image, encode_jpeg, rotate_image
 router = APIRouter(prefix="/api/batches", tags=["batches"])
 
 
-class _FlushableZipStream:
-    """Minimal write-only, non-seekable file-like object for zipfile.
-
-    zipfile.ZipFile checks for a working .seek() and falls back to writing
-    a data descriptor after each entry instead of patching its local file
-    header in place when the target isn't seekable -- which is exactly
-    what lets us hand bytes to the client as they're produced rather than
-    only after the whole archive is built. Deliberately has no .seek
-    attribute at all so zipfile's AttributeError-based feature check finds
-    it non-seekable rather than raising at request time.
-    """
-
-    def __init__(self) -> None:
-        self._buffer = bytearray()
-        self._pos = 0
-
-    def write(self, data: bytes) -> int:
-        self._buffer += data
-        self._pos += len(data)
-        return len(data)
-
-    def tell(self) -> int:
-        return self._pos
-
-    def flush(self) -> None:
-        pass
-
-    def close(self) -> None:
-        # zipfile doesn't call this for an externally-provided file-like
-        # object (only for paths it opened itself), but implementing it
-        # keeps this a fully well-behaved writable-file object rather than
-        # one that happens to work because of that specific code path.
-        pass
-
-    def take(self) -> bytes:
-        """Return and clear whatever has been written since the last take()."""
-        data = bytes(self._buffer)
-        self._buffer.clear()
-        return data
 
 
 def _natural_sort_key(filename: str, side: str) -> tuple:
@@ -307,8 +268,13 @@ def force_advance_batch(
 @router.get("/{batch_id}/export")
 def export_batch_zip(
     batch_id: int, db: Session = Depends(get_db), _user=Depends(require_reviewer)
-) -> StreamingResponse:
-    """Stream a ZIP of all cropped card images for the batch, with rotation applied."""
+) -> Response:
+    """Build and return a ZIP of all non-duplicate cropped card images for the batch.
+
+    The archive is assembled fully in memory before the response is sent so that
+    any R2 download failure raises a 500 *before* we commit to a 200 OK -- preventing
+    the client from receiving a structurally incomplete (corrupted) archive.
+    """
     batch = db.get(Batch, batch_id)
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found")
@@ -350,9 +316,7 @@ def export_batch_zip(
             "No cropped images found for this batch",
         )
 
-    # Convert to plain tuples NOW, before the session closes.
     # Exclude confirmed duplicates and sort: card number naturally, front before back.
-    # The generator must not touch any SQLAlchemy ORM objects.
     entries: list[tuple[str, int, str, str]] = sorted(
         (
             (r2_key, rotation or 0, original_filename, side.value)
@@ -363,55 +327,37 @@ def export_batch_zip(
         key=lambda e: _natural_sort_key(e[2], e[3]),
     )
 
-    def generate_zip():
-        # zipfile writes sequentially and only needs .write()/.tell() to
-        # work; it doesn't need to seek backwards as long as it detects the
-        # stream isn't seekable (no .seek attribute here), in which case it
-        # writes a trailing data descriptor instead of patching the local
-        # file header in place. That lets us flush each entry's bytes out
-        # to the client as soon as it's written, instead of building the
-        # whole archive in a BytesIO before sending anything -- a batch of
-        # 200 cards at ~300KB each no longer means ~60MB held in memory for
-        # one request, just one entry's worth at a time.
-        stream = _FlushableZipStream()
-        with zipfile.ZipFile(stream, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for r2_key, rotation_degrees, original_filename, side_value in entries:
-                try:
-                    img_bytes = storage.download_bytes(r2_key)
-                except Exception:
-                    continue  # skip missing/inaccessible images gracefully
-
-                # Apply stored rotation
-                if rotation_degrees % 360 != 0:
-                    try:
-                        img = decode_image(img_bytes)
-                        img = rotate_image(img, rotation_degrees)
-                        img_bytes = encode_jpeg(img)
-                    except Exception:
-                        pass  # use unrotated image if rotation fails
-
-                # Build a clean filename: stem_side.jpg
-                stem = original_filename.rsplit(".", 1)[0]
-                filename = f"{stem}_{side_value}.jpg"
-                zf.writestr(filename, img_bytes)
-
-                chunk = stream.take()
-                if chunk:
-                    yield chunk
-
-        # Central directory (and anything else written on __exit__)
-        trailing = stream.take()
-        if trailing:
-            yield trailing
-
     label = batch.source_label or f"batch_{batch_id}"
     safe_label = "".join(c if c.isalnum() or c in "-_ " else "_" for c in label).strip()
     disposition = f'attachment; filename="{safe_label}.zip"'
 
-    return StreamingResponse(
-        generate_zip(),
+    # Build the full ZIP in memory before sending a single byte. Any R2 error
+    # raised here becomes a 500 response rather than a truncated/corrupt download.
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for r2_key, rotation_degrees, original_filename, side_value in entries:
+            img_bytes = storage.download_bytes(r2_key)  # raises on failure → 500, not corrupt ZIP
+
+            # Apply stored rotation
+            if rotation_degrees % 360 != 0:
+                try:
+                    img = decode_image(img_bytes)
+                    img = rotate_image(img, rotation_degrees)
+                    img_bytes = encode_jpeg(img)
+                except Exception:
+                    pass  # use unrotated image if rotation fails
+
+            stem = original_filename.rsplit(".", 1)[0]
+            zf.writestr(f"{stem}_{side_value}.jpg", img_bytes)
+
+    zip_bytes = buf.getvalue()
+    return Response(
+        content=zip_bytes,
         media_type="application/zip",
-        headers={"Content-Disposition": disposition},
+        headers={
+            "Content-Disposition": disposition,
+            "Content-Length": str(len(zip_bytes)),
+        },
     )
 
 

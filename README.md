@@ -42,11 +42,6 @@ By replacing manual OS image viewers and informal spreadsheet tracking, CardFlow
 * **Visual & Quantitative Comparison:** Side-by-side candidate review UI detailing structural distance, HSV color similarity, and scan metadata.
 * **Audited Decision History:** Every duplicate confirmation or rejection records the operator ID, user role, and exact timestamp.
 
-### 🛡️ Secure User Authentication & Access Controls
-* **Secure Sessions & Token Revocation:** Token-based authentication backed by `httpOnly`, `SameSite=none`, `Secure` refresh cookies and instant Redis session revocation.
-* **Granular Permissions:** Configurable access controls enforcing user permissions across backend endpoints and frontend navigation.
-* **API Rate Limiting:** Sliding-window rate limiting powered by Redis to protect authentication and system endpoints against brute-force abuse.
-
 ### 📊 Modern Web Dashboard
 * **Built with React 18 + Vite:** Fast, responsive UI powered by Tailwind CSS, Radix UI primitives, Lucide icons, and light/dark theme modes.
 * **Live System Monitoring:** Real-time progress bars, batch queue counters, and system health status indicators (Postgres, Redis, Celery).
@@ -107,7 +102,7 @@ flowchart TD
 | **Vision & Image Processing** | OpenCV, Pillow, [ImageHash](https://github.com/JohannesBuchner/imagehash) | Contour extraction, perspective warp, pHash, HSV color signatures |
 | **Database** | PostgreSQL 16 + [SQLAlchemy 2.0](https://www.sqlalchemy.org/) | Relational persistence, indexing, audit log |
 | **Database Migrations** | [Alembic](https://alembic.sqlalchemy.org/) | Schema migrations & RBAC version control |
-| **Object Storage** | Cloudflare R2 / AWS S3 / MinIO | Scalable storage for raw scans and cropped card assets |
+| **Object Storage** | Cloudflare R2 or AWS S3 | Scalable storage for raw scans and cropped card assets |
 | **Frontend UI** | React 18, Vite, TypeScript, Tailwind CSS | High-performance dashboard, hotkey queues, dark mode |
 | **State & Navigation** | React Router 6, Lucide Icons | Client-side routing, modern icons |
 | **Containerization** | Docker, Docker Compose | Production & development environment orchestration |
@@ -314,8 +309,3 @@ CardFlow/
 └── TESTING.md                  # Manual curl test walkthrough & verification guide
 ```
 
----
-
-## 📄 License
-
-This project is proprietary software developed for high-volume card scanning workflows. All rights reserved.
