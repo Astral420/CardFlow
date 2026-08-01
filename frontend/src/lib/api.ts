@@ -221,6 +221,10 @@ export async function forceAdvanceBatch(batchId: number) {
   return data;
 }
 
+export async function deleteBatch(batchId: number): Promise<void> {
+  await client.delete(`/batches/${batchId}`);
+}
+
 export async function getBatchDuplicates(batchId: number) {
   const { data } = await client.get<BatchDuplicatePair[]>(`/batches/${batchId}/duplicates`);
   return data;

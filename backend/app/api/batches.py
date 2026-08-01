@@ -18,11 +18,12 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import storage
-from app.api.deps import get_current_user_optional, require_reviewer
+from app.api.deps import get_current_user_optional, require_admin, require_reviewer
 from app.batch_status import refresh_batch_status
 from app.db import get_db
 from app.models import (
     Batch,
+    BatchAuditLog,
     BatchStatus,
     CardCrop,
     DuplicateCandidate,
@@ -239,7 +240,7 @@ def get_batch_scans(
 
 @router.post("/{batch_id}/force-advance", response_model=BatchDetailOut)
 def force_advance_batch(
-    batch_id: int, db: Session = Depends(get_db), _user=Depends(require_reviewer)
+    batch_id: int, db: Session = Depends(get_db), _user=Depends(require_admin)
 ) -> BatchDetailOut:
     """Mark all stuck 'pending' scans as crop_failed and recompute batch status.
 
@@ -396,12 +397,135 @@ def export_batch_zip(
 
     # Export and download are the same request/response here (there's no
     # separate async download step) -- see /OBSERVABILITY.md.
+
     return Response(
         content=zip_bytes,
         media_type="application/zip",
         headers={
             "Content-Disposition": disposition,
             "Content-Length": str(len(zip_bytes)),
+        },
+    )
+
+
+@router.delete("/{batch_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_batch(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+) -> None:
+    """Hard-delete a batch: remove all R2 objects then cascade-delete all DB rows.
+
+    Steps (in order):
+      1. Load the batch (404 if missing).
+      2. Collect every R2 key associated with this batch.
+      3. Attempt R2 deletions -- failures are non-fatal (logged + counted).
+      4. Write a BatchAuditLog row to Postgres *before* the cascade so the
+         scan count is still readable.
+      5. Delete the Batch row -- SQLAlchemy cascade removes raw_scans,
+         card_crops, and duplicate_candidates automatically.
+      6. Commit.
+      7. Push a best-effort summary entry to obs:recent_batch_deletes (Redis).
+
+    Auth: admin only (403 for reviewers and guests).
+    """
+    batch = db.get(Batch, batch_id)
+    if batch is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found")
+
+    # ------------------------------------------------------------------ #
+    # 1. Collect R2 keys                                                   #
+    # ------------------------------------------------------------------ #
+    r2_keys: list[str] = []
+
+    # Temp upload ZIP (may or may not still exist -- delete_object is idempotent)
+    r2_keys.append(storage.temp_upload_key(batch_id))
+
+    # Raw scan images
+    scans = db.query(RawScan).filter(RawScan.batch_id == batch_id).all()
+    for scan in scans:
+        if scan.r2_key_raw:
+            r2_keys.append(scan.r2_key_raw)
+
+    # Cropped card images
+    crop_ids = [scan.crop.id for scan in scans if scan.crop is not None]
+    if crop_ids:
+        crops = db.query(CardCrop).filter(CardCrop.id.in_(crop_ids)).all()
+        for crop in crops:
+            if crop.r2_key_cropped:
+                r2_keys.append(crop.r2_key_cropped)
+
+    scan_count = len(scans)
+
+    # ------------------------------------------------------------------ #
+    # 2. Delete R2 objects (non-fatal on individual failure)               #
+    # ------------------------------------------------------------------ #
+    r2_deleted = 0
+    r2_failed = 0
+    r2_failure_notes: list[str] = []
+
+    for key in r2_keys:
+        try:
+            storage.delete_object(key)
+            r2_deleted += 1
+        except Exception as exc:
+            r2_failed += 1
+            r2_failure_notes.append(f"{key}: {exc}")
+            logger.warning(
+                "R2 delete failed for key %s (batch %d): %s",
+                key, batch_id, exc,
+                extra={"batch_id": batch_id, "r2_key": key},
+            )
+
+    # ------------------------------------------------------------------ #
+    # 3. Write durable Postgres audit log *before* the cascade delete      #
+    # ------------------------------------------------------------------ #
+    notes_str = "; ".join(r2_failure_notes) if r2_failure_notes else None
+    audit = BatchAuditLog(
+        batch_id=batch_id,
+        performed_by=current_user.id,
+        action="hard_delete",
+        source_label=batch.source_label,
+        batch_status=batch.status.value if batch.status else None,
+        scan_count=scan_count,
+        r2_keys_deleted=r2_deleted,
+        r2_keys_failed=r2_failed,
+        notes=notes_str,
+    )
+    db.add(audit)
+
+    # ------------------------------------------------------------------ #
+    # 4. Cascade-delete the batch row (raw_scans → card_crops → dup cands) #
+    # ------------------------------------------------------------------ #
+    db.delete(batch)
+    db.commit()
+
+    # ------------------------------------------------------------------ #
+    # 5. Structured log event                                              #
+    # ------------------------------------------------------------------ #
+    log_event(
+        "batch hard deleted",
+        batch_id=batch_id,
+        performed_by=current_user.id,
+        source_label=batch.source_label,
+        scan_count=scan_count,
+        r2_keys_deleted=r2_deleted,
+        r2_keys_failed=r2_failed,
+    )
+
+    # ------------------------------------------------------------------ #
+    # 6. Best-effort Redis feed for the ops dashboard                      #
+    # ------------------------------------------------------------------ #
+    redis_state.push_recent(
+        "obs:recent_batch_deletes",
+        {
+            "batch_id": batch_id,
+            "source_label": batch.source_label,
+            "performed_by": current_user.id,
+            "scan_count": scan_count,
+            "r2_keys_deleted": r2_deleted,
+            "r2_keys_failed": r2_failed,
+            "at": redis_state.now_iso(),
         },
     )
 

@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, ImageOff, Maximize2, ExternalLink, Download, AlertTriangle,
-  Loader2, Images, Copy, CheckCircle2, ArrowRight,
+  Loader2, Images, Copy, CheckCircle2, ArrowRight, Trash2,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { RotatedImage, FullscreenLightbox } from '@/components/shared/image-lightbox'
+import { DeleteBatchDialog } from '@/components/shared/delete-batch-dialog'
 import { useAuth } from '@/lib/auth'
 import type { BatchDuplicatePair, RawScan } from '@/lib/types'
 
@@ -484,7 +485,7 @@ export function BatchDetailPage() {
                   {isExporting ? 'Preparing\u2026' : 'Download ZIP'}
                 </Button>
               )}
-              {showForceAdvance && canEdit && (
+              {showForceAdvance && isAdmin && (
                 <Button
                   variant="secondary"
                   size="sm"
@@ -499,6 +500,22 @@ export function BatchDetailPage() {
                   )}
                   Force Advance
                 </Button>
+              )}
+              {batch && isAdmin && (
+                <DeleteBatchDialog
+                  batch={batch}
+                  trigger={
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="gap-2 border-accent-rose-solid/40 bg-accent-rose text-accent-rose-foreground hover:bg-accent-rose/70"
+                      aria-label="Delete this batch permanently"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete Batch
+                    </Button>
+                  }
+                />
               )}
             </div>
           </div>

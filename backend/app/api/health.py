@@ -174,6 +174,7 @@ def health_pipeline(db: Session = Depends(get_db)) -> dict:
         "recent_uploads": redis_state.get_recent("obs:recent_uploads", limit=15),
         "recent_exports": redis_state.get_recent("obs:recent_exports", limit=15),
         "recent_failures": redis_state.get_recent("obs:recent_failures", limit=20),
+        "recent_batch_deletes": redis_state.get_recent("obs:recent_batch_deletes", limit=15),
         "stage_timings": redis_state.stage_summary(),
         "task_counters": {
             "started": tasks_started,
