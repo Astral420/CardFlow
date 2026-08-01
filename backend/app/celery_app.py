@@ -16,4 +16,5 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
 )
 
+import app.observability.celery_signals  # noqa: E402,F401  registers structured-logging + task-lifecycle signal handlers
 import app.tasks  # noqa: E402,F401  registers @shared_task functions

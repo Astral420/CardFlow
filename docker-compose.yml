@@ -1,4 +1,14 @@
+x-app-logging: &app-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
+  # All services log continuously as structured JSON now (see
+  # /OBSERVABILITY.md) -- cap and rotate stdout (api/worker only; postgres
+  # and redis's own logs are comparatively low-volume) so that doesn't
+  # fill the disk on a long-running host.
   postgres:
     image: postgres:16-alpine
     environment:
@@ -32,6 +42,7 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+    logging: *app-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -54,6 +65,7 @@ services:
       start_period: 20s
     volumes:
       - ./backend:/app
+    logging: *app-logging
     depends_on:
       postgres:
         condition: service_healthy

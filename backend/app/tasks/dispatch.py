@@ -10,7 +10,9 @@ import logging
 from celery.app.task import Task
 from kombu.exceptions import KombuError, OperationalError
 
-logger = logging.getLogger(__name__)
+from app.observability import redis_state
+
+logger = logging.getLogger("cardflow.dispatch")
 
 
 def enqueue_task(task: Task, *args, **kwargs) -> bool:
@@ -18,11 +20,13 @@ def enqueue_task(task: Task, *args, **kwargs) -> bool:
         task.delay(*args, **kwargs)
     except (KombuError, OperationalError, OSError) as exc:
         logger.warning(
-            "Could not enqueue Celery task %s with args=%s kwargs=%s: %s",
-            task.name,
-            args,
-            kwargs,
-            exc,
+            "could not enqueue Celery task -- broker unreachable, is Redis up?",
+            extra={
+                "task_name": task.name,
+                "exception_type": type(exc).__name__,
+                "error_message": str(exc),
+            },
         )
+        redis_state.incr_counter("dispatch_failures")
         return False
     return True

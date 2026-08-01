@@ -51,6 +51,20 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173"]
     cors_origin_regex: str = ""
 
+    # Observability (see /OBSERVABILITY.md)
+    environment: str = "development"
+    log_level: str = "INFO"
+    # Optional shared secret gating GET /api/ops/dashboard (?token=...).
+    # Left blank, the dashboard is open like the rest of /api/health/* --
+    # see app/api/health.py's module docstring for why that's the default.
+    ops_dashboard_token: str = ""
+    # Optional Slack/Discord-compatible incoming webhook URL. If set,
+    # critical alerts (worker offline, batch stuck) are POSTed there in
+    # addition to being logged and shown on the dashboard. Left blank,
+    # alerting is dashboard/log-only -- see /OBSERVABILITY.md's Alerting
+    # section for why that's a reasonable default at this app's scale.
+    alert_webhook_url: str = ""
+
     def insecure_defaults(self) -> list[str]:
         """Names of settings still at their placeholder value. Used to fail
         loudly on startup instead of silently running with a guessable JWT

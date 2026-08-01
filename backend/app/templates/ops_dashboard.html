@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CardFlow — Pipeline Ops</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: #131722;
+    --panel-border: #232838;
+    --text: #e6e9f0;
+    --muted: #8890a4;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --err: #f87171;
+    --accent: #7dd3fc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--panel-border);
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 10;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: 0.02em; }
+  header .meta { color: var(--muted); font-size: 12px; }
+  #alerts { padding: 0 20px; }
+  .alert {
+    background: #2a1616;
+    border: 1px solid #5a2a2a;
+    color: var(--err);
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin: 8px 0;
+    font-size: 12.5px;
+  }
+  main {
+    padding: 16px 20px 40px;
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  .stat {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .stat .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .stat .value { font-size: 24px; font-weight: 600; margin-top: 6px; }
+  .stat .value.ok { color: var(--ok); }
+  .stat .value.warn { color: var(--warn); }
+  .stat .value.err { color: var(--err); }
+  section.panel {
+    grid-column: 1 / -1;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  section.panel h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin: 0 0 10px;
+    font-weight: 600;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--panel-border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+  th { color: var(--muted); font-weight: 500; font-size: 11px; }
+  tr:last-child td { border-bottom: none; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; }
+  .pill.ok { background: #143621; color: var(--ok); }
+  .pill.err { background: #3a1717; color: var(--err); }
+  .pill.warn { background: #3a2f10; color: var(--warn); }
+  .empty { color: var(--muted); font-style: italic; padding: 6px 0; }
+  footer { text-align: center; color: var(--muted); padding: 20px; font-size: 11px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>CardFlow — Pipeline Ops</h1>
+  <div class="meta" id="generated-at">loading…</div>
+</header>
+<div id="alerts"></div>
+<main id="stats"></main>
+
+<main style="grid-template-columns: 1fr;">
+  <section class="panel">
+    <h2>Active batches</h2>
+    <div id="active-batches"></div>
+  </section>
+  <section class="panel">
+    <h2>Stage timings</h2>
+    <div id="stage-timings"></div>
+  </section>
+  <section class="panel">
+    <h2>Recent uploads</h2>
+    <div id="recent-uploads"></div>
+  </section>
+  <section class="panel">
+    <h2>Recent exports</h2>
+    <div id="recent-exports"></div>
+  </section>
+  <section class="panel">
+    <h2>Recent failures</h2>
+    <div id="recent-failures"></div>
+  </section>
+</main>
+<footer>Auto-refreshes every 4s · source: GET /api/health/pipeline</footer>
+
+<script>
+const qs = new URLSearchParams(location.search);
+const token = qs.get('token') || '';
+const dataUrl = '/api/health/pipeline';
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function statCard(label, value, cls) {
+  return `<div class="stat"><div class="label">${esc(label)}</div><div class="value ${cls||''}">${esc(value)}</div></div>`;
+}
+
+function table(headers, rows, emptyText) {
+  if (!rows.length) return `<div class="empty">${esc(emptyText)}</div>`;
+  const head = `<tr>${headers.map(h => `<th>${esc(h)}</th>`).join('')}</tr>`;
+  const body = rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('');
+  return `<table>${head}${body}</table>`;
+}
+
+function timeAgo(iso) {
+  if (!iso) return '—';
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return Math.floor(s) + 's ago';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  return Math.floor(s / 3600) + 'h ago';
+}
+
+async function refresh() {
+  let data;
+  try {
+    const res = await fetch(dataUrl + (token ? `?token=${encodeURIComponent(token)}` : ''));
+    data = await res.json();
+  } catch (e) {
+    document.getElementById('generated-at').textContent = 'fetch failed: ' + e;
+    return;
+  }
+
+  document.getElementById('generated-at').textContent = 'updated ' + timeAgo(data.generated_at);
+
+  document.getElementById('alerts').innerHTML =
+    (data.alerts || []).map(a => `<div class="alert">⚠ ${esc(a)}</div>`).join('');
+
+  const tc = data.task_counters || {};
+  const failRate = tc.failure_rate ?? 0;
+  document.getElementById('stats').innerHTML = [
+    statCard('Redis', data.redis?.status === 'ok' ? 'ok' : 'down', data.redis?.status === 'ok' ? 'ok' : 'err'),
+    statCard('Celery workers', data.celery?.worker_count ?? 0, data.celery?.worker_count ? 'ok' : 'err'),
+    statCard('Queue depth', data.celery?.queue_depth ?? '—'),
+    statCard('Active batches', (data.active_batches || []).length),
+    statCard('Tasks started', tc.started ?? 0),
+    statCard('Task failure rate', (failRate * 100).toFixed(1) + '%', failRate > 0.2 ? 'err' : (failRate > 0.05 ? 'warn' : 'ok')),
+  ].join('');
+
+  document.getElementById('active-batches').innerHTML = table(
+    ['Batch', 'Stage', 'Updated', 'Started'],
+    (data.active_batches || []).map(b => [
+      esc(b.batch_id), `<span class="pill ${b.stage === 'failed' ? 'err' : (b.stage === 'complete' ? 'ok' : 'warn')}">${esc(b.stage)}</span>`,
+      esc(timeAgo(b.updated_at)), esc(timeAgo(b.started_at)),
+    ]),
+    'No batches currently in flight.'
+  );
+
+  const stages = data.stage_timings || {};
+  document.getElementById('stage-timings').innerHTML = table(
+    ['Stage', 'Count', 'Failed', 'Avg ms', 'Max ms'],
+    Object.entries(stages).map(([name, s]) => [
+      esc(name), esc(s.count), esc(s.failed_count),
+      esc(s.avg_duration_ms ?? '—'), esc(s.max_duration_ms ?? '—'),
+    ]),
+    'No stage activity recorded yet.'
+  );
+
+  document.getElementById('recent-uploads').innerHTML = table(
+    ['Batch', 'ZIP', 'Compressed', 'Images', 'When'],
+    (data.recent_uploads || []).map(u => [
+      esc(u.batch_id), esc(u.zip_filename || '—'), esc(u.compressed_size ? (u.compressed_size/1024).toFixed(0) + ' KB' : '—'),
+      esc(u.supported_images ?? '—'), esc(timeAgo(u.at)),
+    ]),
+    'No uploads yet.'
+  );
+
+  document.getElementById('recent-exports').innerHTML = table(
+    ['Batch', 'Images', 'Output size', 'Checksum', 'When'],
+    (data.recent_exports || []).map(x => [
+      esc(x.batch_id), esc(x.image_count ?? '—'), esc(x.output_size ? (x.output_size/1024).toFixed(0) + ' KB' : '—'),
+      esc(x.checksum || '—'), esc(timeAgo(x.at)),
+    ]),
+    'No exports yet.'
+  );
+
+  document.getElementById('recent-failures').innerHTML = table(
+    ['Batch/Task', 'Stage', 'Exception', 'Message', 'When'],
+    (data.recent_failures || []).map(f => [
+      esc(f.batch_id ?? f.task_name ?? '—'), esc(f.stage ?? '—'),
+      esc(f.exception_type ?? '—'), esc(f.message ?? '—'), esc(timeAgo(f.at)),
+    ]),
+    'No failures recorded. 🎉'
+  );
+}
+
+refresh();
+setInterval(refresh, 4000);
+</script>
+</body>
+</html>

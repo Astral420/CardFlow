@@ -30,6 +30,12 @@ def _client() -> Any:
     )
 
 
+def health_check() -> None:
+    """Raises if R2 isn't reachable / the bucket doesn't exist or isn't
+    accessible with the configured credentials. Used by GET /api/health/storage."""
+    _client().head_bucket(Bucket=settings.r2_bucket_name)
+
+
 def upload_bytes(key: str, data: bytes, content_type: str = "image/jpeg") -> None:
     _client().put_object(
         Bucket=settings.r2_bucket_name,

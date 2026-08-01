@@ -14,6 +14,7 @@ from app.dedup.matching import (
     record_duplicate_candidates,
 )
 from app.models import CardCrop, RawScan
+from app.observability.events import log_event, stage
 
 
 @celery_app.task(name="find_duplicates")
@@ -28,12 +29,21 @@ def _find_duplicates(card_crop_id: int) -> None:
         if raw_scan is None:
             return
 
-        hits = find_within_batch_duplicates(db, crop, raw_scan.batch_id)
-        hits += find_cross_batch_duplicates(db, crop, raw_scan.batch_id)
+        batch_id = raw_scan.batch_id
+        with stage("duplicate_detection", batch_id=batch_id, image_name=raw_scan.original_filename):
+            hits = find_within_batch_duplicates(db, crop, batch_id)
+            hits += find_cross_batch_duplicates(db, crop, batch_id)
 
-        record_duplicate_candidates(db, crop, hits)
-        refresh_batch_status(db, raw_scan.batch_id)
-        db.commit()
+            record_duplicate_candidates(db, crop, hits)
+            refresh_batch_status(db, batch_id)
+            db.commit()
+
+            log_event(
+                "duplicate check finished",
+                batch_id=batch_id,
+                image_name=raw_scan.original_filename,
+                candidates_found=len(hits),
+            )
     except Exception:
         db.rollback()
         raise
