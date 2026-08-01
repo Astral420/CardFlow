@@ -231,14 +231,10 @@ export async function getBatchDuplicates(batchId: number) {
 }
 
 export async function exportBatchZip(batchId: number, filename: string) {
-  const token = getToken();
-  const response = await fetch(`/api/batches/${batchId}/export`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  const response = await client.get(`/batches/${batchId}/export`, {
+    responseType: "blob",
   });
-  if (!response.ok) {
-    throw new Error(`Export failed: ${response.statusText}`);
-  }
-  const blob = await response.blob();
+  const blob = response.data as Blob;
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -346,4 +342,3 @@ export async function checkHealth() {
   const { data } = await client.get<{ status: string }>("/health");
   return data;
 }
-

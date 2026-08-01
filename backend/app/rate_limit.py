@@ -1,12 +1,3 @@
-"""Minimal in-process rate limiter.
-
-Good enough for this app's deployment shape: a single `api` container with
-no replicas (see docker-compose.yml). State lives in process memory, so it
-resets on restart and isn't shared across instances -- if this ever runs
-behind more than one API process, swap this for a Redis-backed limiter
-instead.
-"""
-
 import threading
 import time
 from collections import defaultdict, deque
