@@ -120,6 +120,10 @@
     <h2>Recent failures</h2>
     <div id="recent-failures"></div>
   </section>
+  <section class="panel" style="border-color:#5a2a2a">
+    <h2 style="color:var(--err)">Recent batch deletes</h2>
+    <div id="recent-batch-deletes"></div>
+  </section>
 </main>
 <footer>Auto-refreshes every 4s · source: GET /api/health/pipeline</footer>
 
@@ -221,6 +225,20 @@ async function refresh() {
       esc(f.exception_type ?? '—'), esc(f.message ?? '—'), esc(timeAgo(f.at)),
     ]),
     'No failures recorded. 🎉'
+  );
+
+  document.getElementById('recent-batch-deletes').innerHTML = table(
+    ['Batch', 'Label', 'Scans', 'R2 deleted', 'R2 failed', 'By (user)', 'When'],
+    (data.recent_batch_deletes || []).map(d => [
+      esc(d.batch_id),
+      esc(d.source_label || '—'),
+      esc(d.scan_count ?? '—'),
+      esc(d.r2_keys_deleted ?? '—'),
+      `<span class="${d.r2_keys_failed > 0 ? 'pill warn' : ''}">${esc(d.r2_keys_failed ?? '—')}</span>`,
+      esc(d.performed_by ?? '—'),
+      esc(timeAgo(d.at)),
+    ]),
+    'No batch deletes recorded.'
   );
 }
 

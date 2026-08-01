@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, ImageOff, Maximize2, ExternalLink, Download, AlertTriangle,
-  Loader2, Images, Copy, CheckCircle2, ArrowRight,
+  Loader2, Images, Copy, CheckCircle2, ArrowRight, Trash2,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -15,11 +15,13 @@ import { EmptyState } from '@/components/shared/empty-state'
 import { SectionLabel } from '@/components/shared/section-label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ProgressBar } from '@/components/ui/progress-bar'
+import { getBatchProgress } from '@/lib/progress'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { RotatedImage, FullscreenLightbox } from '@/components/shared/image-lightbox'
+import { DeleteBatchDialog } from '@/components/shared/delete-batch-dialog'
 import { useAuth } from '@/lib/auth'
 import type { BatchDuplicatePair, RawScan } from '@/lib/types'
 
@@ -363,7 +365,7 @@ type TabId = 'scans' | 'duplicates'
 export function BatchDetailPage() {
   const { id } = useParams<{ id: string }>()
   const batchId = Number(id)
-  const { canEdit } = useAuth()
+  const { canEdit, isAdmin } = useAuth()
   const [selectedScan, setSelectedScan] = useState<RawScan | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
   const [isExporting, setIsExporting] = useState(false)
@@ -376,7 +378,7 @@ export function BatchDetailPage() {
     enabled: !!batchId,
     refetchInterval: (query) => {
       const b = query.state.data
-      return b && (b.status === 'extracting' || b.status === 'cropping') ? 2500 : false
+      return b && b.status !== 'complete' ? 2500 : false
     },
   })
 
@@ -385,7 +387,7 @@ export function BatchDetailPage() {
     queryFn: () => getBatchScans(batchId),
     enabled: !!batchId,
     refetchInterval: () => {
-      return batch && (batch.status === 'extracting' || batch.status === 'cropping') ? 2500 : false
+      return batch && batch.status !== 'complete' ? 2500 : false
     },
   })
 
@@ -416,23 +418,7 @@ export function BatchDetailPage() {
     }
   }
 
-  let progressValue = 0
-  if (batch) {
-    if (batch.status === 'complete') {
-      progressValue = 100
-    } else if (batch.status === 'duplicate_review') {
-      progressValue = 80
-    } else if (batch.status === 'rotation_review') {
-      progressValue = 60
-    } else if (batch.status === 'cropping') {
-      const total = batch.counts.scans
-      const done = batch.counts.cropped + batch.counts.crop_failed
-      const cropRatio = total > 0 ? done / total : 0
-      progressValue = Math.round(40 + cropRatio * 20)
-    } else if (batch.status === 'extracting') {
-      progressValue = 20
-    }
-  }
+  const progressValue = batch ? getBatchProgress(batch) : 0
 
   const showForceAdvance =
     batch?.status === 'cropping' &&
@@ -499,7 +485,7 @@ export function BatchDetailPage() {
                   {isExporting ? 'Preparing\u2026' : 'Download ZIP'}
                 </Button>
               )}
-              {showForceAdvance && canEdit && (
+              {showForceAdvance && isAdmin && (
                 <Button
                   variant="secondary"
                   size="sm"
@@ -514,6 +500,22 @@ export function BatchDetailPage() {
                   )}
                   Force Advance
                 </Button>
+              )}
+              {batch && isAdmin && (
+                <DeleteBatchDialog
+                  batch={batch}
+                  trigger={
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="gap-2 border-accent-rose-solid/40 bg-accent-rose text-accent-rose-foreground hover:bg-accent-rose/70"
+                      aria-label="Delete this batch permanently"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete Batch
+                    </Button>
+                  }
+                />
               )}
             </div>
           </div>
