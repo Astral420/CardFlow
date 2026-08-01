@@ -365,7 +365,7 @@ type TabId = 'scans' | 'duplicates'
 export function BatchDetailPage() {
   const { id } = useParams<{ id: string }>()
   const batchId = Number(id)
-  const { canEdit } = useAuth()
+  const { canEdit, isAdmin } = useAuth()
   const [selectedScan, setSelectedScan] = useState<RawScan | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
   const [isExporting, setIsExporting] = useState(false)
