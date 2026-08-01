@@ -52,7 +52,7 @@ export function DashboardPage() {
     queryFn: () => listBatches(5),
     refetchInterval: (query) => {
       const list = query.state.data ?? []
-      const hasActive = list.some((b) => b.status === 'extracting' || b.status === 'cropping')
+      const hasActive = list.some((b) => b.status !== 'complete')
       return hasActive ? 3000 : 15_000
     },
   })

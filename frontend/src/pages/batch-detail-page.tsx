@@ -15,6 +15,7 @@ import { EmptyState } from '@/components/shared/empty-state'
 import { SectionLabel } from '@/components/shared/section-label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ProgressBar } from '@/components/ui/progress-bar'
+import { getBatchProgress } from '@/lib/progress'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
@@ -376,7 +377,7 @@ export function BatchDetailPage() {
     enabled: !!batchId,
     refetchInterval: (query) => {
       const b = query.state.data
-      return b && (b.status === 'extracting' || b.status === 'cropping') ? 2500 : false
+      return b && b.status !== 'complete' ? 2500 : false
     },
   })
 
@@ -385,7 +386,7 @@ export function BatchDetailPage() {
     queryFn: () => getBatchScans(batchId),
     enabled: !!batchId,
     refetchInterval: () => {
-      return batch && (batch.status === 'extracting' || batch.status === 'cropping') ? 2500 : false
+      return batch && batch.status !== 'complete' ? 2500 : false
     },
   })
 
@@ -416,23 +417,7 @@ export function BatchDetailPage() {
     }
   }
 
-  let progressValue = 0
-  if (batch) {
-    if (batch.status === 'complete') {
-      progressValue = 100
-    } else if (batch.status === 'duplicate_review') {
-      progressValue = 80
-    } else if (batch.status === 'rotation_review') {
-      progressValue = 60
-    } else if (batch.status === 'cropping') {
-      const total = batch.counts.scans
-      const done = batch.counts.cropped + batch.counts.crop_failed
-      const cropRatio = total > 0 ? done / total : 0
-      progressValue = Math.round(40 + cropRatio * 20)
-    } else if (batch.status === 'extracting') {
-      progressValue = 20
-    }
-  }
+  const progressValue = batch ? getBatchProgress(batch) : 0
 
   const showForceAdvance =
     batch?.status === 'cropping' &&
