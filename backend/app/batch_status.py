@@ -10,6 +10,7 @@ from app.models import (
     RawScan,
     ScanStatus,
 )
+from app.observability import redis_state
 
 
 def refresh_batch_status(db: Session, batch_id: int) -> BatchStatus | None:
@@ -29,6 +30,7 @@ def refresh_batch_status(db: Session, batch_id: int) -> BatchStatus | None:
     )
     if scans_count == 0:
         batch.status = BatchStatus.extracting
+        redis_state.set_batch_stage(batch_id, batch.status.value)
         return batch.status
 
     pending_scans = (
@@ -39,6 +41,7 @@ def refresh_batch_status(db: Session, batch_id: int) -> BatchStatus | None:
     )
     if pending_scans:
         batch.status = BatchStatus.cropping
+        redis_state.set_batch_stage(batch_id, batch.status.value)
         return batch.status
 
     pending_rotation = (
@@ -54,6 +57,7 @@ def refresh_batch_status(db: Session, batch_id: int) -> BatchStatus | None:
     )
     if pending_rotation:
         batch.status = BatchStatus.rotation_review
+        redis_state.set_batch_stage(batch_id, batch.status.value)
         return batch.status
 
     pending_duplicate_review = (
@@ -69,7 +73,9 @@ def refresh_batch_status(db: Session, batch_id: int) -> BatchStatus | None:
     )
     if pending_duplicate_review:
         batch.status = BatchStatus.duplicate_review
+        redis_state.set_batch_stage(batch_id, batch.status.value)
         return batch.status
 
     batch.status = BatchStatus.complete
+    redis_state.mark_batch_terminal(batch_id, "complete")
     return batch.status

@@ -1,4 +1,6 @@
+import hashlib
 import io
+import logging
 import zipfile
 
 from fastapi import (
@@ -40,8 +42,12 @@ from app.schemas import (
 import re as _re
 
 from app.api.common import finite_float_or_none
+from app.observability import redis_state
+from app.observability.events import log_event, stage
 from app.tasks.extract import extract_batch
 from app.vision.hashing import decode_image, encode_jpeg, rotate_image
+
+logger = logging.getLogger("cardflow.batches")
 
 router = APIRouter(prefix="/api/batches", tags=["batches"])
 
@@ -97,7 +103,14 @@ async def upload_batch(
         storage.temp_upload_key(batch.id), zip_bytes, content_type="application/zip"
     )
 
-    extract_batch.delay(batch.id)
+    log_event(
+        "ZIP uploaded",
+        batch_id=batch.id,
+        zip_filename=file.filename,
+        compressed_size=len(zip_bytes),
+    )
+
+    extract_batch.delay(batch.id, zip_filename=file.filename)
 
     return BatchCreateResponse(batch_id=batch.id)
 
@@ -279,6 +292,8 @@ def export_batch_zip(
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found")
 
+    log_event("export requested", batch_id=batch_id)
+
     # Collect crop IDs that are confirmed duplicates (card_crop_id_b in a confirmed pair)
     confirmed_dup_crop_ids: set[int] = set(
         row[0]
@@ -311,6 +326,11 @@ def export_batch_zip(
     )
 
     if not rows:
+        log_event(
+            "export rejected: no cropped images found",
+            level=logging.WARNING,
+            batch_id=batch_id,
+        )
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             "No cropped images found for this batch",
@@ -331,26 +351,51 @@ def export_batch_zip(
     safe_label = "".join(c if c.isalnum() or c in "-_ " else "_" for c in label).strip()
     disposition = f'attachment; filename="{safe_label}.zip"'
 
-    # Build the full ZIP in memory before sending a single byte. Any R2 error
-    # raised here becomes a 500 response rather than a truncated/corrupt download.
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for r2_key, rotation_degrees, original_filename, side_value in entries:
-            img_bytes = storage.download_bytes(r2_key)  # raises on failure → 500, not corrupt ZIP
+    with stage("export", batch_id=batch_id, image_count=len(entries)):
+        log_event("images collected for export", batch_id=batch_id, image_count=len(entries))
 
-            # Apply stored rotation
-            if rotation_degrees % 360 != 0:
-                try:
-                    img = decode_image(img_bytes)
-                    img = rotate_image(img, rotation_degrees)
-                    img_bytes = encode_jpeg(img)
-                except Exception:
-                    pass  # use unrotated image if rotation fails
+        # Build the full ZIP in memory before sending a single byte. Any R2 error
+        # raised here becomes a 500 response rather than a truncated/corrupt download.
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for r2_key, rotation_degrees, original_filename, side_value in entries:
+                img_bytes = storage.download_bytes(r2_key)  # raises on failure → 500, not corrupt ZIP
 
-            stem = original_filename.rsplit(".", 1)[0]
-            zf.writestr(f"{stem}_{side_value}.jpg", img_bytes)
+                # Apply stored rotation
+                if rotation_degrees % 360 != 0:
+                    try:
+                        img = decode_image(img_bytes)
+                        img = rotate_image(img, rotation_degrees)
+                        img_bytes = encode_jpeg(img)
+                    except Exception:
+                        pass  # use unrotated image if rotation fails
 
-    zip_bytes = buf.getvalue()
+                stem = original_filename.rsplit(".", 1)[0]
+                zf.writestr(f"{stem}_{side_value}.jpg", img_bytes)
+
+        zip_bytes = buf.getvalue()
+        checksum = hashlib.sha256(zip_bytes).hexdigest()[:16]
+
+        log_event(
+            "export completed",
+            batch_id=batch_id,
+            output_size=len(zip_bytes),
+            image_count=len(entries),
+            checksum=checksum,
+        )
+        redis_state.push_recent(
+            "obs:recent_exports",
+            {
+                "batch_id": batch_id,
+                "output_size": len(zip_bytes),
+                "image_count": len(entries),
+                "checksum": checksum,
+                "at": redis_state.now_iso(),
+            },
+        )
+
+    # Export and download are the same request/response here (there's no
+    # separate async download step) -- see /OBSERVABILITY.md.
     return Response(
         content=zip_bytes,
         media_type="application/zip",

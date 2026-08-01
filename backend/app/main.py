@@ -1,13 +1,29 @@
 from contextlib import asynccontextmanager
 
+# Must run before any other app module logs anything (including the
+# imports right below, several of which log at import/startup time).
+from app.observability.logging_config import setup_logging
+
+setup_logging(service="cardflow-api")
+
+import logging
+
 import redis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 import app.celery_app
-from app.api import auth, batches, cards, duplicates, rotation, users
+from app.api import auth, batches, cards, duplicates, health, ops, rotation, users
 from app.config import settings
+from app.observability.errors import (
+    ExplainedError,
+    explained_error_handler,
+    unhandled_exception_handler,
+)
+from app.observability.middleware import RequestLoggingMiddleware
 from app.redis_client import redis_client
+
+logger = logging.getLogger("cardflow.startup")
 
 
 @asynccontextmanager
@@ -31,11 +47,14 @@ async def lifespan(_app: FastAPI):
             "(needed for login and session revocation)."
         ) from exc
 
+    logger.info("cardflow-api ready", extra={"environment": settings.environment})
     yield
+    logger.info("cardflow-api shutting down")
 
 
 app = FastAPI(title="Card Tool API", lifespan=lifespan)
 
+app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -45,14 +64,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.add_exception_handler(ExplainedError, explained_error_handler)
+app.add_exception_handler(Exception, unhandled_exception_handler)
+
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(batches.router)
 app.include_router(rotation.router)
 app.include_router(duplicates.router)
 app.include_router(cards.router)
-
-
-@app.get("/api/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+app.include_router(health.router)
+app.include_router(ops.router)

@@ -11,6 +11,7 @@ from app import storage
 from app.celery_app import celery_app
 from app.db import SessionLocal
 from app.models import CardCrop, RawScan, ScanSide
+from app.observability.events import log_event, stage
 from app.tasks.dispatch import enqueue_task
 from app.vision.hashing import (
     decode_image,
@@ -34,19 +35,23 @@ def _hash_crop(card_crop_id: int) -> None:
         if raw_scan is None or raw_scan.side != ScanSide.front:
             return  # hash only the front image
 
-        image_bytes = storage.download_bytes(crop.r2_key_cropped)
+        batch_id = raw_scan.batch_id
+        with stage("hashing", batch_id=batch_id, image_name=raw_scan.original_filename):
+            image_bytes = storage.download_bytes(crop.r2_key_cropped)
 
-        if crop.rotation_degrees % 360:
-            image = decode_image(image_bytes)
-            image = rotate_image(image, crop.rotation_degrees)
-            image_bytes = encode_jpeg(image)
+            if crop.rotation_degrees % 360:
+                image = decode_image(image_bytes)
+                image = rotate_image(image, crop.rotation_degrees)
+                image_bytes = encode_jpeg(image)
 
-        results = hash_and_color_at_all_rotations(image_bytes)
-        crop.hash_0, crop.color_sig_0 = results[0]
-        crop.hash_90, crop.color_sig_90 = results[90]
-        crop.hash_180, crop.color_sig_180 = results[180]
-        crop.hash_270, crop.color_sig_270 = results[270]
-        db.commit()
+            results = hash_and_color_at_all_rotations(image_bytes)
+            crop.hash_0, crop.color_sig_0 = results[0]
+            crop.hash_90, crop.color_sig_90 = results[90]
+            crop.hash_180, crop.color_sig_180 = results[180]
+            crop.hash_270, crop.color_sig_270 = results[270]
+            db.commit()
+
+            log_event("image hashed", batch_id=batch_id, image_name=raw_scan.original_filename)
     except Exception:
         db.rollback()
         raise
