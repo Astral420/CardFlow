@@ -1,8 +1,6 @@
 # CardFlow 🃏
 > **Automated Card Processing, Edge-Detection Cropping & Rotation-Invariant Deduplication Engine**
 
-[![Backend CI/CD](https://github.com/Astral420/CardFlow/actions/workflows/backend-test.yml/badge.svg)](https://github.com/Astral420/CardFlow/actions)
-[![Frontend CI](https://github.com/Astral420/CardFlow/actions/workflows/frontend-ci.yml/badge.svg)](https://github.com/Astral420/CardFlow/actions)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-18.3+-61DAFB.svg?style=flat&logo=react&logoColor=black)](https://reactjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.2+-3178C6.svg?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)

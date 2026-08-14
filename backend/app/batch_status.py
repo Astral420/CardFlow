@@ -24,6 +24,20 @@ def refresh_batch_status(db: Session, batch_id: int) -> BatchStatus | None:
     if batch is None:
         return None
 
+    # Terminal state: once a batch has completed its pipeline, it is done
+    # for good and must not be re-derived. Without this guard, a batch can
+    # be pulled back into an active stage by state that has nothing to do
+    # with its own pipeline -- most notably cross-batch duplicate detection
+    # (app.dedup.matching.find_cross_batch_duplicates), which compares new
+    # uploads against cards in *every* batch, including already-completed
+    # ones. A duplicate candidate created against an old batch's card would
+    # otherwise cause that old batch to flip from "complete" back to
+    # "duplicate_review" the next time its status happened to be refreshed
+    # (e.g. viewing its detail page, or resolving that candidate in the
+    # review queue), even though nothing in that batch itself is unfinished.
+    if batch.status == BatchStatus.complete:
+        return batch.status
+
     scans_count = (
         db.query(func.count(RawScan.id)).filter(RawScan.batch_id == batch_id).scalar()
         or 0

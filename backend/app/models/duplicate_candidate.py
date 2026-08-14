@@ -25,10 +25,10 @@ class DuplicateCandidate(Base):
     # Indexed: record_duplicate_candidates() looks up an existing row by
     # this pair before inserting, and cards.py filters by either side of it.
     card_crop_id_a: Mapped[int] = mapped_column(
-        ForeignKey("card_crops.id"), nullable=False, index=True
+        ForeignKey("card_crops.id", ondelete="CASCADE"), nullable=False, index=True
     )
     card_crop_id_b: Mapped[int] = mapped_column(
-        ForeignKey("card_crops.id"), nullable=False, index=True
+        ForeignKey("card_crops.id", ondelete="CASCADE"), nullable=False, index=True
     )
     structural_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     color_score: Mapped[float | None] = mapped_column(Float, nullable=True)
