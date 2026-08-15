@@ -414,18 +414,19 @@ def delete_batch(
     db: Session = Depends(get_db),
     current_user=Depends(require_admin),
 ) -> None:
-    """Hard-delete a batch: remove all R2 objects then cascade-delete all DB rows.
+    """Hard-delete a batch: delete DB rows within transaction, then remove R2 objects.
 
     Steps (in order):
       1. Load the batch (404 if missing).
-      2. Collect every R2 key associated with this batch.
-      3. Attempt R2 deletions -- failures are non-fatal (logged + counted).
-      4. Write a BatchAuditLog row to Postgres *before* the cascade so the
-         scan count is still readable.
-      5. Delete the Batch row -- SQLAlchemy cascade removes raw_scans,
-         card_crops, and duplicate_candidates automatically.
-      6. Commit.
-      7. Push a best-effort summary entry to obs:recent_batch_deletes (Redis).
+      2. Collect every R2 key associated with this batch and snapshot metadata.
+      3. Create a BatchAuditLog row and cascade-delete the Batch row in Postgres.
+      4. Commit the DB transaction. If this fails, the transaction rolls back
+         and no storage objects are deleted.
+      5. Delete each object from R2 via storage.delete_object -- failures are
+         non-fatal (logged and updated in the audit log).
+      6. Update BatchAuditLog with actual R2 delete results.
+      7. Structured log event (audit trail in centralized logs).
+      8. Push a best-effort summary entry to obs:recent_batch_deletes (Redis).
 
     Auth: admin only (403 for reviewers and guests).
     """
@@ -434,7 +435,7 @@ def delete_batch(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found")
 
     # ------------------------------------------------------------------ #
-    # 1. Collect R2 keys                                                   #
+    # 1. Collect R2 keys and snapshot batch metadata                       #
     # ------------------------------------------------------------------ #
     r2_keys: list[str] = []
 
@@ -456,9 +457,29 @@ def delete_batch(
                 r2_keys.append(crop.r2_key_cropped)
 
     scan_count = len(scans)
+    batch_source_label = batch.source_label
+    batch_status_val = batch.status.value if batch.status else None
 
     # ------------------------------------------------------------------ #
-    # 2. Delete R2 objects (non-fatal on individual failure)               #
+    # 2. Write durable Postgres audit log & cascade-delete DB rows       #
+    # ------------------------------------------------------------------ #
+    audit = BatchAuditLog(
+        batch_id=batch_id,
+        performed_by=current_user.id,
+        action="hard_delete",
+        source_label=batch_source_label,
+        batch_status=batch_status_val,
+        scan_count=scan_count,
+        r2_keys_deleted=0,
+        r2_keys_failed=0,
+        notes=None,
+    )
+    db.add(audit)
+    db.delete(batch)
+    db.commit()
+
+    # ------------------------------------------------------------------ #
+    # 3. Delete R2 objects (post-commit, non-fatal on individual failure) #
     # ------------------------------------------------------------------ #
     r2_deleted = 0
     r2_failed = 0
@@ -473,54 +494,46 @@ def delete_batch(
             r2_failure_notes.append(f"{key}: {exc}")
             logger.warning(
                 "R2 delete failed for key %s (batch %d): %s",
-                key, batch_id, exc,
+                key,
+                batch_id,
+                exc,
                 extra={"batch_id": batch_id, "r2_key": key},
             )
 
-    # ------------------------------------------------------------------ #
-    # 3. Write durable Postgres audit log *before* the cascade delete      #
-    # ------------------------------------------------------------------ #
     notes_str = "; ".join(r2_failure_notes) if r2_failure_notes else None
-    audit = BatchAuditLog(
-        batch_id=batch_id,
-        performed_by=current_user.id,
-        action="hard_delete",
-        source_label=batch.source_label,
-        batch_status=batch.status.value if batch.status else None,
-        scan_count=scan_count,
-        r2_keys_deleted=r2_deleted,
-        r2_keys_failed=r2_failed,
-        notes=notes_str,
-    )
-    db.add(audit)
+    try:
+        audit.r2_keys_deleted = r2_deleted
+        audit.r2_keys_failed = r2_failed
+        audit.notes = notes_str
+        db.commit()
+    except Exception as exc:
+        logger.warning(
+            "Failed to update audit log for batch %d with R2 results: %s",
+            batch_id,
+            exc,
+        )
 
     # ------------------------------------------------------------------ #
-    # 4. Cascade-delete the batch row (raw_scans → card_crops → dup cands) #
-    # ------------------------------------------------------------------ #
-    db.delete(batch)
-    db.commit()
-
-    # ------------------------------------------------------------------ #
-    # 5. Structured log event                                              #
+    # 4. Structured log event                                              #
     # ------------------------------------------------------------------ #
     log_event(
         "batch hard deleted",
         batch_id=batch_id,
         performed_by=current_user.id,
-        source_label=batch.source_label,
+        source_label=batch_source_label,
         scan_count=scan_count,
         r2_keys_deleted=r2_deleted,
         r2_keys_failed=r2_failed,
     )
 
     # ------------------------------------------------------------------ #
-    # 6. Best-effort Redis feed for the ops dashboard                      #
+    # 5. Best-effort Redis feed for the ops dashboard                      #
     # ------------------------------------------------------------------ #
     redis_state.push_recent(
         "obs:recent_batch_deletes",
         {
             "batch_id": batch_id,
-            "source_label": batch.source_label,
+            "source_label": batch_source_label,
             "performed_by": current_user.id,
             "scan_count": scan_count,
             "r2_keys_deleted": r2_deleted,

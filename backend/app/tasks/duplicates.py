@@ -9,7 +9,6 @@ from app.celery_app import celery_app
 from app.batch_status import refresh_batch_status
 from app.db import SessionLocal
 from app.dedup.matching import (
-    find_cross_batch_duplicates,
     find_within_batch_duplicates,
     record_duplicate_candidates,
 )
@@ -32,7 +31,6 @@ def _find_duplicates(card_crop_id: int) -> None:
         batch_id = raw_scan.batch_id
         with stage("duplicate_detection", batch_id=batch_id, image_name=raw_scan.original_filename):
             hits = find_within_batch_duplicates(db, crop, batch_id)
-            hits += find_cross_batch_duplicates(db, crop, batch_id)
 
             record_duplicate_candidates(db, crop, hits)
             refresh_batch_status(db, batch_id)

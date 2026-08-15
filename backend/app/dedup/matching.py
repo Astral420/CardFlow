@@ -95,6 +95,8 @@ def find_within_batch_duplicates(
     return hits
 
 
+#find_cross_batch_duplicates to be reintroduced in the future if needed
+
 def find_cross_batch_duplicates(
     db: Session, crop: CardCrop, batch_id: int
 ) -> list[DuplicateHit]:
