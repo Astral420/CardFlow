@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base
 
 if TYPE_CHECKING:
+    from app.models.batch_export import BatchExport
     from app.models.raw_scan import RawScan
 
 
@@ -36,3 +37,7 @@ class Batch(Base):
     raw_scans: Mapped[list["RawScan"]] = relationship(
         back_populates="batch", cascade="all, delete-orphan"
     )
+    exports: Mapped[list["BatchExport"]] = relationship(
+        back_populates="batch", cascade="all, delete-orphan"
+    )
+

@@ -54,12 +54,15 @@ def delete_object(key: str) -> None:
     _client().delete_object(Bucket=settings.r2_bucket_name, Key=key)
 
 
-def presigned_url(key: str, expires_in: int = 3600) -> str:
+def presigned_url(key: str, expires_in: int = 3600, filename: str | None = None) -> str:
     if settings.r2_public_base_url:
         return f"{settings.r2_public_base_url.rstrip('/')}/{key}"
+    params: dict[str, Any] = {"Bucket": settings.r2_bucket_name, "Key": key}
+    if filename:
+        params["ResponseContentDisposition"] = f'attachment; filename="{filename}"'
     return _client().generate_presigned_url(
         "get_object",
-        Params={"Bucket": settings.r2_bucket_name, "Key": key},
+        Params=params,
         ExpiresIn=expires_in,
     )
 
@@ -74,3 +77,8 @@ def cropped_key(batch_id: int, crop_id: int, side: str, ext: str = "jpg") -> str
 
 def temp_upload_key(batch_id: int) -> str:
     return f"tmp/uploads/{batch_id}.zip"
+
+
+def export_key(batch_id: int, manifest_hash: str) -> str:
+    return f"exports/{batch_id}/{manifest_hash}.zip"
+

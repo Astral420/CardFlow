@@ -168,3 +168,4 @@ class BatchDuplicatePairOut(BaseModel):
     filename_match: bool
     kept: BatchDuplicateCropOut    # card_crop_a — the one that stays
     removed: BatchDuplicateCropOut  # card_crop_b — the one excluded from export
+

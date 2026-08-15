@@ -132,3 +132,5 @@ export interface BatchDuplicatePair {
   kept: BatchDuplicateCrop;    // card_crop_a — stays in export
   removed: BatchDuplicateCrop; // card_crop_b — excluded from export
 }
+
+
