@@ -132,3 +132,14 @@ export interface BatchDuplicatePair {
   kept: BatchDuplicateCrop;    // card_crop_a — stays in export
   removed: BatchDuplicateCrop; // card_crop_b — excluded from export
 }
+
+export interface BatchExportResponse {
+  download_url: string;
+  filename: string;
+  file_size_bytes: number;
+  image_count: number;
+  cached: boolean;
+  manifest_hash: string;
+  created_at: string;
+}
+

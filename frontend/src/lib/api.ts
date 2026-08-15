@@ -3,6 +3,7 @@ import type {
   Batch,
   BatchDetail,
   BatchDuplicatePair,
+  BatchExportResponse,
   CardCrop,
   CardCropDetail,
   CreateUserPayload,
@@ -13,6 +14,7 @@ import type {
   RotationNext,
   User,
 } from "./types";
+
 
 const TOKEN_KEY = "card-tool.token";
 
@@ -244,6 +246,8 @@ export async function exportBatchZip(batchId: number, filename: string) {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+
 
 // ---- Rotation review ----
 

@@ -210,13 +210,18 @@ async function refresh() {
   );
 
   document.getElementById('recent-exports').innerHTML = table(
-    ['Batch', 'Images', 'Output size', 'Checksum', 'When'],
+    ['Batch', 'Source', 'Images', 'Output size', 'Checksum', 'When'],
     (data.recent_exports || []).map(x => [
-      esc(x.batch_id), esc(x.image_count ?? '—'), esc(x.output_size ? (x.output_size/1024).toFixed(0) + ' KB' : '—'),
-      esc(x.checksum || '—'), esc(timeAgo(x.at)),
+      esc(x.batch_id),
+      `<span class="pill ${x.source === 'r2_cache' ? 'ok' : 'warn'}">${esc(x.source === 'r2_cache' ? 'R2 Cache (Hit)' : (x.source === 'backend_generated' ? 'Backend (Miss)' : '—'))}</span>`,
+      esc(x.image_count ?? '—'),
+      esc(x.output_size ? (x.output_size/1024).toFixed(0) + ' KB' : '—'),
+      esc(x.checksum || '—'),
+      esc(timeAgo(x.at)),
     ]),
     'No exports yet.'
   );
+
 
   document.getElementById('recent-failures').innerHTML = table(
     ['Batch/Task', 'Stage', 'Exception', 'Message', 'When'],
