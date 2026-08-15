@@ -39,7 +39,6 @@ from app.schemas import (
     BatchDetailOut,
     BatchDuplicateCropOut,
     BatchDuplicatePairOut,
-    BatchExportResponse,
     BatchOut,
     RawScanOut,
 )

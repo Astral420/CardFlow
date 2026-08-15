@@ -169,13 +169,3 @@ class BatchDuplicatePairOut(BaseModel):
     kept: BatchDuplicateCropOut    # card_crop_a — the one that stays
     removed: BatchDuplicateCropOut  # card_crop_b — the one excluded from export
 
-
-class BatchExportResponse(BaseModel):
-    download_url: str
-    filename: str
-    file_size_bytes: int
-    image_count: int
-    cached: bool
-    manifest_hash: str
-    created_at: datetime
-
