@@ -106,6 +106,16 @@ class Settings(BaseSettings):
     # ideal than our own contour-based crops ever would. Wider than
     # aspect_ratio_tolerance on purpose; tune empirically, see spec Section 11.
     precropped_aspect_ratio_tolerance: float = 0.35
+    # Fallback already-cropped signal, checked *after* contour detection
+    # runs (see _full_frame_area_fraction docstring): if the detected +
+    # padded box still covers this much of the frame or more, treat it the
+    # same as the perimeter-based passthrough case rather than grading it
+    # against the strict raw-scan tolerance. Set high enough that a real
+    # raw scan's genuinely-cropped card region (per test_crop.py's laminated-
+    # card band, ~10-16% of frame area even after padding) never comes
+    # close, so this only fires when contour detection truly found nothing
+    # to crop.
+    contour_full_frame_area_fraction: float = 0.97
 
     # Duplicate detection (tune empirically, see spec Section 11)
     structural_hash_max_distance: int = 10  # out of 64 bits (pHash)

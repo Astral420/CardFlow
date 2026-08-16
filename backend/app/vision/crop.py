@@ -11,6 +11,19 @@ card (e.g. a scanner that auto-crops on-device) rather than a raw shot of
 the whole scan bed. Those are detected up front, before contour detection
 runs, and short-circuited to a passthrough path -- see
 `_perimeter_background_fraction` / `_passthrough_crop` below.
+
+That fast, perimeter-based check is a proxy (a real raw scan's outermost
+pixels are almost all background), and proxies have blind spots: a
+pre-cropped image whose card art itself runs dark right to the edge (e.g. a
+black-bordered foil/chrome card) can read as enough "background" along its
+border to miss the passthrough cutoff even though there's no actual scan
+bed to find. Rather than loosen that cutoff -- real raw scans and this edge
+case overlap in the same range, so a looser cutoff risks the opposite,
+much worse failure of treating a genuine raw scan as pre-cropped and never
+cropping it -- `auto_crop` also checks a second, independent signal after
+contour detection runs: if the detected box still covers essentially the
+whole frame, there was nothing to crop away regardless of what the
+perimeter heuristic said. See `_full_frame_area_fraction` below.
 """
 
 from dataclasses import dataclass
@@ -31,6 +44,13 @@ class CropResult:
     aspect_ratio: float
     aspect_ratio_ok: bool
     orientation: str
+    # True when this image was judged to already be cropped tight to the
+    # card -- either via the fast perimeter-background check up front, or
+    # via the post-contour full-frame-area fallback below -- and therefore
+    # graded against precropped_aspect_ratio_tolerance instead of
+    # aspect_ratio_tolerance. Callers use this to label the scan `skipped`
+    # (no crop transform was needed) instead of `cropped`.
+    already_cropped: bool = False
 
 
 def _order_points(pts: np.ndarray) -> np.ndarray:
@@ -111,7 +131,32 @@ def _passthrough_crop(image: np.ndarray) -> CropResult:
         aspect_ratio=aspect_ratio,
         aspect_ratio_ok=aspect_ratio_ok,
         orientation=orientation,
+        already_cropped=True,
     )
+
+
+def _full_frame_area_fraction(box: np.ndarray, image_shape: tuple[int, ...]) -> float:
+    """Fraction of the total image area the (already padding-expanded,
+    clipped) detected box covers.
+
+    Contour detection always returns *some* box -- on a genuine raw scan
+    that's a small fraction of the frame (the card, plus padding). If it
+    instead covers essentially the entire frame, contour detection found no
+    real scan-bed background to separate from the card, which happens on
+    already-cropped input that slipped past the perimeter pre-check (e.g. a
+    dark-bordered card pushing enough near-black pixels onto its own edge).
+    That's independent evidence of the same "nothing to crop" condition the
+    perimeter check looks for, just observed after the fact instead of
+    before.
+    """
+    image_area = image_shape[0] * image_shape[1]
+    if image_area <= 0:
+        return 0.0
+    # Shoelace formula over the (already ordered) box points.
+    x = box[:, 0]
+    y = box[:, 1]
+    box_area = 0.5 * abs(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1)))
+    return float(box_area / image_area)
 
 
 def _candidate_contours(gray: np.ndarray) -> list[np.ndarray]:
@@ -259,6 +304,24 @@ def auto_crop(image_bytes: bytes) -> CropResult:
     contour = _best_contour(contours, image.shape)
     rect = cv2.minAreaRect(contour)
     box = _expanded_box(rect, image.shape)
+
+    # Fallback already-cropped signal (see _full_frame_area_fraction):
+    # contour detection ran but found essentially the whole frame, meaning
+    # there was no real scan-bed background to separate from the card in
+    # the first place -- the same underlying condition the perimeter
+    # pre-check above is trying to catch, just missed by that heuristic
+    # (e.g. a dark-bordered card inflating the perimeter's own background
+    # count). Defer to the same passthrough path used for that case rather
+    # than trusting this box's perspective warp: minAreaRect's angle is
+    # unstable on a near-full-frame contour for exactly the same reason
+    # _passthrough_crop's docstring gives for skipping contour detection on
+    # already-cropped input entirely -- running it anyway risks introducing
+    # a spurious rotation/flip into an image that was already upright.
+    if (
+        _full_frame_area_fraction(box, image.shape)
+        >= settings.contour_full_frame_area_fraction
+    ):
+        return _passthrough_crop(image)
 
     ordered = _order_points(box)
     source_w, source_h = _side_lengths(ordered)

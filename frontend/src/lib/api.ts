@@ -294,7 +294,7 @@ export async function getDuplicateQueueCount() {
 
 export async function decideDuplicate(
   candidateId: number,
-  status: "confirmed_duplicate" | "rejected"
+  status: "confirmed_duplicate" | "intentional_duplicate" | "rejected"
 ) {
   const { data } = await client.post<DuplicateCandidate | null>(
     `/review/duplicates/${candidateId}/decision`,

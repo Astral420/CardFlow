@@ -23,7 +23,10 @@ def _next_pending(
         db.query(CardCrop)
         .join(RawScan)
         .filter(
-            RawScan.status == ScanStatus.cropped,
+            # `skipped` scans (already properly cropped, crop transform
+            # skipped) still need a human to confirm rotation, same as
+            # `cropped` -- see app.batch_status.refresh_batch_status.
+            RawScan.status.in_((ScanStatus.cropped, ScanStatus.skipped)),
             CardCrop.rotation_confirmed_at.is_(None),
         )
         .order_by(CardCrop.id)
@@ -69,7 +72,7 @@ def queue_count(
         db.query(CardCrop)
         .join(RawScan)
         .filter(
-            RawScan.status == ScanStatus.cropped,
+            RawScan.status.in_((ScanStatus.cropped, ScanStatus.skipped)),
             CardCrop.rotation_confirmed_at.is_(None),
         )
         .count()

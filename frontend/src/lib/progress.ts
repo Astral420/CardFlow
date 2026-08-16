@@ -44,7 +44,11 @@ export function getBatchProgress(batch: BatchDetail): number {
   }
 
   if (status === 'rotation_review') {
-    const total = counts.cropped  // only cropped scans go to rotation review
+    // `skipped` scans (already properly cropped, crop transform was a
+    // no-op) still go through rotation review exactly like `cropped` ones
+    // do — both need to be counted here, or this ratio goes wrong (even
+    // negative) for a batch made up mostly of pre-cropped scans.
+    const total = counts.cropped + counts.skipped
     const pending = counts.pending_rotation
     if (total <= 0) return 60
     const confirmed = total - pending
@@ -55,7 +59,7 @@ export function getBatchProgress(batch: BatchDetail): number {
   if (status === 'cropping') {
     const total = counts.scans
     if (total <= 0) return 20
-    const done = counts.cropped + counts.crop_failed
+    const done = counts.cropped + counts.skipped + counts.crop_failed
     const ratio = done / total
     return Math.round(20 + ratio * 40)
   }

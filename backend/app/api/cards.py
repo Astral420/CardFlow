@@ -94,6 +94,9 @@ def get_card(
         duplicate_history=[
             DuplicateCandidateOut(
                 candidate_id=d.id,
+                batch_id=d.card_crop_a.raw_scan.batch_id,
+                source_label=d.card_crop_a.raw_scan.batch.source_label,
+                status=d.status,
                 structural_score=finite_float_or_none(d.structural_score),
                 color_score=finite_float_or_none(d.color_score),
                 filename_match=d.filename_match,

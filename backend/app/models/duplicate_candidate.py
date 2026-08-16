@@ -15,6 +15,10 @@ if TYPE_CHECKING:
 class DuplicateStatus(str, enum.Enum):
     pending = "pending"
     confirmed_duplicate = "confirmed_duplicate"
+    # Same physical card legitimately scanned more than once (e.g. multiple
+    # copies in inventory) -- acknowledged as a match, but unlike
+    # confirmed_duplicate neither side is excluded from the batch export.
+    intentional_duplicate = "intentional_duplicate"
     rejected = "rejected"
 
 

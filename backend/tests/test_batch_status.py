@@ -169,3 +169,56 @@ def test_non_terminal_batch_still_advances_normally():
         assert status == BatchStatus.rotation_review
     finally:
         db.close()
+
+
+def test_skipped_scan_gates_status_same_as_cropped():
+    """`skipped` (crop transform was a no-op -- image was already properly
+    cropped, see app.vision.crop.CropResult.already_cropped) must be
+    treated identically to `cropped` for pipeline-progress purposes: still
+    needs rotation review, and once rotation is confirmed and there are no
+    pending duplicates, the batch still reaches `complete`. A `skipped`
+    scan getting excluded here would silently strand it out of rotation
+    review / hashing / dedup forever."""
+    db = _make_session()
+    try:
+        batch = Batch(status=BatchStatus.extracting)
+        db.add(batch)
+        db.flush()
+
+        raw_scan = RawScan(
+            batch_id=batch.id,
+            r2_key_raw="raw/1/card-1-front.jpg",
+            original_filename="card-1-front.jpg",
+            side=ScanSide.front,
+            status=ScanStatus.skipped,
+        )
+        db.add(raw_scan)
+        db.flush()
+
+        crop = CardCrop(
+            raw_scan_id=raw_scan.id,
+            r2_key_cropped="cropped/1/1-front.jpg",
+        )
+        db.add(crop)
+        db.commit()
+
+        # Rotation not confirmed yet -> same as a `cropped` scan would be.
+        status = refresh_batch_status(db, batch.id)
+        db.commit()
+        assert status == BatchStatus.rotation_review
+
+        # Confirm rotation, then re-derive -> should progress past rotation
+        # review exactly like `cropped` does, straight to complete (no
+        # pending duplicates).
+        crop.rotation_confirmed_at = __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        )
+        crop.hash_0 = "0" * 16
+        crop.color_sig_0 = [0.0]
+        db.commit()
+
+        status = refresh_batch_status(db, batch.id)
+        db.commit()
+        assert status == BatchStatus.complete
+    finally:
+        db.close()

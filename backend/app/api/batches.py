@@ -130,6 +130,12 @@ def _batch_counts(db: Session, batch_id: int) -> BatchCountsOut:
         .scalar()
         or 0
     )
+    skipped_count = (
+        db.query(func.count(RawScan.id))
+        .filter(RawScan.batch_id == batch_id, RawScan.status == ScanStatus.skipped)
+        .scalar()
+        or 0
+    )
     crop_failed_count = (
         db.query(func.count(RawScan.id))
         .filter(RawScan.batch_id == batch_id, RawScan.status == ScanStatus.crop_failed)
@@ -141,7 +147,7 @@ def _batch_counts(db: Session, batch_id: int) -> BatchCountsOut:
         .join(RawScan)
         .filter(
             RawScan.batch_id == batch_id,
-            RawScan.status == ScanStatus.cropped,
+            RawScan.status.in_((ScanStatus.cropped, ScanStatus.skipped)),
             CardCrop.rotation_confirmed_at.is_(None),
         )
         .scalar()
@@ -161,6 +167,7 @@ def _batch_counts(db: Session, batch_id: int) -> BatchCountsOut:
     return BatchCountsOut(
         scans=scans_count,
         cropped=cropped_count,
+        skipped=skipped_count,
         crop_failed=crop_failed_count,
         pending_rotation=pending_rotation,
         pending_duplicate_review=pending_duplicate_review,
@@ -204,28 +211,40 @@ def get_batch_scans(
     # Sort: natural order on card stem (numeric-aware), then front before back
     scans.sort(key=lambda s: _natural_sort_key(s.original_filename, s.side.value))
 
-    # Collect crop IDs that are the "loser" (card_crop_id_b) in a confirmed duplicate
-    confirmed_dup_crop_ids: set[int] = set(
-        row[0]
-        for row in db.query(DuplicateCandidate.card_crop_id_b)
+    # Collect crop IDs that are the "loser" (card_crop_id_b) in a resolved
+    # duplicate pair, split by status: confirmed_duplicate is excluded from
+    # export (see export_batch_zip below), intentional_duplicate is not --
+    # both are still worth flagging in the UI, just with different meaning.
+    dup_rows = (
+        db.query(DuplicateCandidate.card_crop_id_b, DuplicateCandidate.status)
         .join(CardCrop, DuplicateCandidate.card_crop_id_a == CardCrop.id)
         .join(RawScan, CardCrop.raw_scan_id == RawScan.id)
         .filter(
             RawScan.batch_id == batch_id,
-            DuplicateCandidate.status == DuplicateStatus.confirmed_duplicate,
+            DuplicateCandidate.status.in_(
+                (DuplicateStatus.confirmed_duplicate, DuplicateStatus.intentional_duplicate)
+            ),
         )
         .all()
     )
+    confirmed_dup_crop_ids: set[int] = {
+        crop_id for crop_id, status_ in dup_rows if status_ == DuplicateStatus.confirmed_duplicate
+    }
+    intentional_dup_crop_ids: set[int] = {
+        crop_id for crop_id, status_ in dup_rows if status_ == DuplicateStatus.intentional_duplicate
+    }
 
     results = []
     for scan in scans:
         thumbnail_url = None
         rotation_degrees = 0
         is_duplicate = False
+        is_intentional_duplicate = False
         if scan.crop and scan.crop.r2_key_cropped:
             thumbnail_url = storage.presigned_url(scan.crop.r2_key_cropped)
             rotation_degrees = scan.crop.rotation_degrees or 0
-            is_duplicate = scan.crop.id in confirmed_dup_crop_ids
+            is_intentional_duplicate = scan.crop.id in intentional_dup_crop_ids
+            is_duplicate = scan.crop.id in confirmed_dup_crop_ids or is_intentional_duplicate
         results.append(
             RawScanOut(
                 id=scan.id,
@@ -235,6 +254,7 @@ def get_batch_scans(
                 thumbnail_url=thumbnail_url,
                 rotation_degrees=rotation_degrees,
                 is_duplicate=is_duplicate,
+                is_intentional_duplicate=is_intentional_duplicate,
             )
         )
     return results
@@ -298,7 +318,11 @@ def export_batch_zip(
 
     log_event("export requested", batch_id=batch_id)
 
-    # Collect crop IDs that are confirmed duplicates (card_crop_id_b in a confirmed pair)
+    # Collect crop IDs to exclude from the export: card_crop_id_b in a
+    # confirmed-duplicate pair. Deliberately scoped to confirmed_duplicate
+    # only -- intentional_duplicate pairs are an acknowledged match that's
+    # still supposed to ship both sides (e.g. genuinely holding 2 copies of
+    # the same card), so they must NOT appear in this exclusion set.
     confirmed_dup_crop_ids: set[int] = set(
         row[0]
         for row in db.query(DuplicateCandidate.card_crop_id_b)
@@ -685,19 +709,25 @@ def get_batch_duplicates(
     db: Session = Depends(get_db),
     _user=Depends(get_current_user_optional),
 ) -> list[BatchDuplicatePairOut]:
-    """Return all confirmed-duplicate pairs for a batch with image URLs and scores."""
+    """Return all resolved (confirmed or intentional) duplicate pairs for a
+    batch with image URLs and scores. Both statuses are surfaced here so
+    the batch detail page's Duplicates tab is a complete resolution log --
+    the `status` on each pair tells the frontend which ones were actually
+    excluded from the export (confirmed_duplicate only, see
+    export_batch_zip) versus intentionally kept as-is."""
     batch = db.get(Batch, batch_id)
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found")
 
-    # Fetch confirmed duplicate candidates where card_crop_a belongs to this batch
     candidates = (
         db.query(DuplicateCandidate)
         .join(CardCrop, DuplicateCandidate.card_crop_id_a == CardCrop.id)
         .join(RawScan, CardCrop.raw_scan_id == RawScan.id)
         .filter(
             RawScan.batch_id == batch_id,
-            DuplicateCandidate.status == DuplicateStatus.confirmed_duplicate,
+            DuplicateCandidate.status.in_(
+                (DuplicateStatus.confirmed_duplicate, DuplicateStatus.intentional_duplicate)
+            ),
         )
         .order_by(DuplicateCandidate.id)
         .all()
@@ -722,6 +752,7 @@ def get_batch_duplicates(
         results.append(
             BatchDuplicatePairOut(
                 candidate_id=c.id,
+                status=c.status,
                 structural_score=finite_float_or_none(c.structural_score),
                 color_score=finite_float_or_none(c.color_score),
                 filename_match=c.filename_match,

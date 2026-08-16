@@ -63,7 +63,10 @@ def refresh_batch_status(db: Session, batch_id: int) -> BatchStatus | None:
         .join(RawScan)
         .filter(
             RawScan.batch_id == batch_id,
-            RawScan.status == ScanStatus.cropped,
+            # `skipped` (crop transform was a no-op -- already properly
+            # cropped) still needs a human to confirm rotation, same as
+            # `cropped`; only `crop_failed` scans skip rotation review.
+            RawScan.status.in_((ScanStatus.cropped, ScanStatus.skipped)),
             CardCrop.rotation_confirmed_at.is_(None),
         )
         .scalar()

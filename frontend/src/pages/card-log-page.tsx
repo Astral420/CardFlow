@@ -174,7 +174,7 @@ function CardDetailDrawer({ cropId, onClose }: { cropId: number; onClose: () => 
                   <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Duplicate flags</span>
                   <div className="flex flex-wrap gap-1 pt-0.5">
                     {detail.duplicate_history.map((d) => (
-                      <DuplicateStatusBadge key={d.candidate_id} status={d.status as any} />
+                      <DuplicateStatusBadge key={d.candidate_id} status={d.status} />
                     ))}
                   </div>
                 </div>
@@ -287,6 +287,7 @@ export function CardLogPage() {
           <option value="">All Statuses</option>
           <option value="pending">Pending</option>
           <option value="cropped">Cropped</option>
+          <option value="skipped">Already Cropped</option>
           <option value="crop_failed">Crop Failed</option>
         </FilterSelect>
       </Toolbar>

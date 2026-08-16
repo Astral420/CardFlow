@@ -27,6 +27,11 @@ const SCAN_STATUS_META: Record<
 > = {
   pending: { label: "Pending", variant: "neutral" },
   cropped: { label: "Cropped", variant: "mint" },
+  // Crop transform was a no-op — image was already tight to the card and
+  // within tolerance, so nothing needed cropping. Distinct from `cropped`
+  // (we performed the crop) but otherwise flows through the pipeline the
+  // same way (still needs rotation review, hashing, dedup).
+  skipped: { label: "Already cropped", variant: "blue" },
   crop_failed: { label: "Crop failed", variant: "rose" },
 };
 
@@ -45,6 +50,10 @@ const DUPLICATE_STATUS_META: Record<
 > = {
   pending: { label: "Pending review", variant: "peach" },
   confirmed_duplicate: { label: "Confirmed duplicate", variant: "rose" },
+  // Acknowledged as the same physical card (e.g. multiple copies
+  // genuinely in inventory) — unlike confirmed_duplicate, NOT excluded
+  // from the batch export; both sides ship.
+  intentional_duplicate: { label: "Intentional duplicate", variant: "lavender" },
   rejected: { label: "Not a duplicate", variant: "mint" },
 };
 

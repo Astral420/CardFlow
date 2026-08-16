@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 import pytest
 from PIL import Image
+from app.config import settings
 from app.vision.crop import auto_crop
 
 
@@ -369,3 +370,107 @@ def test_auto_crop_raw_scan_with_background_is_unaffected():
     # the fixed crop canvas size, so this confirms which path ran.
     assert (decoded.shape[1], decoded.shape[0]) in {(750, 1050), (1050, 750)}
     assert result.aspect_ratio_ok is True
+    assert result.already_cropped is False
+
+
+# --- Fallback already-cropped signal (post-contour full-frame area) ---
+#
+# Regression coverage for a real production case: a pre-cropped card whose
+# own art/border runs dark enough right to the frame edge that the fast
+# perimeter-background pre-check (_perimeter_background_fraction) reads
+# enough "background" along the border to miss the passthrough cutoff --
+# even though there's no actual scan bed to find. Confirmed against real
+# inventory scans (a dark Prizm chrome card measured ~0.80 border-background
+# fraction, just over the 0.8 passthrough cutoff) before this fix; contour
+# detection then found a box spanning essentially the whole frame and
+# graded it against the strict raw-scan tolerance instead of the wide
+# pre-cropped one, incorrectly flagging a perfectly good already-cropped
+# card as crop_failed.
+
+
+def _make_dark_bordered_precropped_bytes(
+    width: int, height: int, border_bg_fraction: float = 0.85
+) -> bytes:
+    """A pre-cropped card image with no real scan-bed background, but whose
+    outermost ring of pixels reads mostly near-black anyway -- simulating a
+    card whose own dark border/art runs to the frame edge. `border_bg_
+    fraction` controls how much of that outer ring is darkened, calibrated
+    here to land just above precropped_perimeter_bg_max_fraction (0.8) so
+    the fast perimeter pre-check misses it and the post-contour fallback
+    has to catch it instead.
+    """
+    canvas = np.full((height, width, 3), (200, 200, 200), dtype=np.uint8)
+    marker = min(width, height) // 6
+    canvas[0:marker, 0:marker] = (0, 0, 220)  # red-ish marker, top-left, BGR
+
+    n_top = int(width * border_bg_fraction)
+    n_side = int(height * border_bg_fraction)
+    canvas[0, marker : marker + n_top] = (2, 2, 2)
+    canvas[-1, :n_top] = (2, 2, 2)
+    canvas[marker : marker + n_side, 0] = (2, 2, 2)
+    canvas[:n_side, -1] = (2, 2, 2)
+
+    ok, buf = cv2.imencode(".jpg", canvas, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    assert ok
+    return buf.tobytes()
+
+
+def test_auto_crop_dark_bordered_precrop_misses_fast_perimeter_check():
+    # Sanity-check the test fixture itself: confirm this synthetic image
+    # actually reproduces the scenario (misses the fast passthrough cutoff)
+    # rather than accidentally passing it, which would make the next test
+    # a false positive.
+    from app.vision.crop import _decode_image_with_display_orientation, _perimeter_background_fraction
+
+    image_bytes = _make_dark_bordered_precropped_bytes(908, 1103)
+    image = _decode_image_with_display_orientation(image_bytes)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    bg_fraction = _perimeter_background_fraction(gray, settings.scan_background_threshold)
+    assert bg_fraction > settings.precropped_perimeter_bg_max_fraction
+
+
+def test_auto_crop_dark_bordered_precrop_still_accepted_via_fallback():
+    width, height = 908, 1103
+    image_bytes = _make_dark_bordered_precropped_bytes(width, height)
+    result = auto_crop(image_bytes)
+
+    assert result.already_cropped is True
+    assert result.aspect_ratio_ok is True
+    # Would fail the strict raw-scan tolerance -- confirms the wide
+    # pre-cropped tolerance is what's actually being applied here, not a
+    # coincidentally-passing strict check.
+    assert abs(result.aspect_ratio - settings.expected_card_aspect_ratio) > settings.aspect_ratio_tolerance
+
+    # Falls back to the same untouched-passthrough behavior as the fast
+    # path: no perspective warp, no resize, marker stays top-left.
+    decoded = cv2.imdecode(
+        np.frombuffer(result.image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR
+    )
+    assert decoded.shape[1] == width
+    assert decoded.shape[0] == height
+    marker_region = decoded[0:20, 0:20]
+    assert int(marker_region[:, :, 0].mean()) < 50
+
+
+def test_auto_crop_dark_bordered_precrop_still_flags_wildly_wrong_ratio():
+    # The fallback grants the wide tolerance, not unconditional acceptance --
+    # a wildly wrong shape should still fail even via this path.
+    image_bytes = _make_dark_bordered_precropped_bytes(600, 600, border_bg_fraction=0.85)
+    result = auto_crop(image_bytes)
+    assert result.already_cropped is True
+    assert result.aspect_ratio_ok is False
+
+
+def test_auto_crop_laminated_card_does_not_trigger_full_frame_fallback():
+    # Guard against the fallback swallowing the real raw-scan laminated-card
+    # case this suite already covers above: that scan's card region is
+    # ~13% of the frame (see _LAMINATED_AREA_FRACTION_BOUNDS), nowhere near
+    # contour_full_frame_area_fraction, so it must still go through normal
+    # contour-based cropping (i.e. get warped/resized), not passthrough.
+    image_bytes = _make_laminated_card_bytes("front")
+    result = auto_crop(image_bytes)
+    assert result.already_cropped is False
+    decoded = cv2.imdecode(
+        np.frombuffer(result.image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR
+    )
+    assert (decoded.shape[1], decoded.shape[0]) in {(750, 1050), (1050, 750)}
