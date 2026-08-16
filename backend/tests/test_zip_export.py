@@ -136,6 +136,7 @@ def test_export_batch_zip_invalidation_and_pruning():
         res1 = export_batch_zip(batch_id=1, db=db, _user=None)
         assert res1.headers["X-Export-Cached"] == "false"
         old_export = db.query(BatchExport).filter_by(batch_id=1).first()
+        assert old_export is not None
         old_hash = old_export.manifest_hash
         old_key = old_export.r2_key
 
