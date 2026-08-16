@@ -75,13 +75,27 @@ def _natural_sort_key(filename: str, side: str) -> tuple:
     return (*parts, side_order)
 
 
-@router.get("", response_model=list[BatchOut])
+@router.get("", response_model=list[BatchDetailOut])
 def list_batches(
     limit: int = Query(default=50, le=200),
     db: Session = Depends(get_db),
     _user=Depends(get_current_user_optional),
-) -> list[Batch]:
-    return db.query(Batch).order_by(Batch.created_at.desc()).limit(limit).all()
+) -> list[BatchDetailOut]:
+    batches = db.query(Batch).order_by(Batch.created_at.desc()).limit(limit).all()
+    for batch in batches:
+        if batch.status != BatchStatus.complete:
+            refresh_batch_status(db, batch.id)
+    db.commit()
+    return [
+        BatchDetailOut(
+            id=batch.id,
+            created_at=batch.created_at,
+            source_label=batch.source_label,
+            status=batch.status,
+            counts=_batch_counts(db, batch.id),
+        )
+        for batch in batches
+    ]
 
 
 @router.post(
@@ -164,6 +178,16 @@ def _batch_counts(db: Session, batch_id: int) -> BatchCountsOut:
         .scalar()
         or 0
     )
+    total_duplicate_candidates = (
+        db.query(func.count(DuplicateCandidate.id))
+        .join(CardCrop, DuplicateCandidate.card_crop_id_a == CardCrop.id)
+        .join(RawScan, CardCrop.raw_scan_id == RawScan.id)
+        .filter(
+            RawScan.batch_id == batch_id,
+        )
+        .scalar()
+        or 0
+    )
     return BatchCountsOut(
         scans=scans_count,
         cropped=cropped_count,
@@ -171,6 +195,7 @@ def _batch_counts(db: Session, batch_id: int) -> BatchCountsOut:
         crop_failed=crop_failed_count,
         pending_rotation=pending_rotation,
         pending_duplicate_review=pending_duplicate_review,
+        total_duplicate_candidates=total_duplicate_candidates,
     )
 
 
@@ -315,6 +340,22 @@ def export_batch_zip(
     batch = db.get(Batch, batch_id)
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found")
+
+    refresh_batch_status(db, batch_id)
+    db.commit()
+    db.refresh(batch)
+
+    if batch.status != BatchStatus.complete:
+        log_event(
+            "export rejected: pipeline incomplete",
+            level=logging.WARNING,
+            batch_id=batch_id,
+            status=batch.status.value,
+        )
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Cannot export batch ZIP: pipeline is not complete (current status: {batch.status.value})",
+        )
 
     log_event("export requested", batch_id=batch_id)
 

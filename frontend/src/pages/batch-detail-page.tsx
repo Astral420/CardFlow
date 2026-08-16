@@ -399,7 +399,7 @@ export function BatchDetailPage() {
     enabled: !!batchId,
     refetchInterval: (query) => {
       const b = query.state.data
-      return b && b.status !== 'complete' ? 2500 : false
+      return b && b.status !== 'complete' ? 1500 : false
     },
   })
 
@@ -408,7 +408,7 @@ export function BatchDetailPage() {
     queryFn: () => getBatchScans(batchId),
     enabled: !!batchId,
     refetchInterval: () => {
-      return batch && batch.status !== 'complete' ? 2500 : false
+      return batch && batch.status !== 'complete' ? 1500 : false
     },
   })
 
@@ -440,6 +440,7 @@ export function BatchDetailPage() {
   }
 
   const progressValue = batch ? getBatchProgress(batch) : 0
+  const isPipelineComplete = batch?.status === 'complete'
 
   const showForceAdvance =
     batch?.status === 'cropping' &&
@@ -499,8 +500,13 @@ export function BatchDetailPage() {
                   variant="secondary"
                   size="sm"
                   onClick={handleExport}
-                  disabled={isExporting}
+                  disabled={isExporting || !isPipelineComplete}
                   className="gap-2"
+                  title={
+                    !isPipelineComplete
+                      ? `Download blocked: pipeline status is "${batch.status}". Complete all stages to export.`
+                      : undefined
+                  }
                 >
                   {isExporting ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />

@@ -258,6 +258,13 @@ docker rm -f card-tool-minio   # if you used the MinIO option
 volume across `docker compose down`/`up`; add `-v` to `down` to wipe it
 and start fresh.)
 
+
+## Future Testing (when in development)
+
+- You are now able to run scripts/dev.py to start the backend/frontend server.
+- If using Windows Command Prompt and the script fails to start the server, **you may need to run `scripts/dev.py` as administrator** (right click the file and select "Run as administrator").
+- This works great once you have configured the environment as per instructions inside this .md file.
+
 ## Troubleshooting
 
 - **Celery worker never picks up tasks / hangs on Windows** — make sure

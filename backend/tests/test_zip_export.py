@@ -339,3 +339,47 @@ def test_delete_batch_cleans_up_cached_export():
         mock_storage.delete_object.assert_any_call(f"exports/{batch.id}/hash123.zip")
         assert db.get(Batch, batch.id) is None
         assert db.query(BatchExport).filter_by(batch_id=batch.id).first() is None
+
+
+def test_export_batch_zip_blocked_when_not_complete():
+    """Verify that export is rejected with 409 Conflict if pipeline is not complete."""
+    from fastapi import HTTPException
+
+    db = _make_session()
+    # 1. Batch in cropping with pending scans
+    batch = Batch(id=6, status=BatchStatus.cropping, source_label="incomplete_batch")
+    db.add(batch)
+    scan = RawScan(
+        id=61,
+        batch_id=6,
+        r2_key_raw="raw/6/61.jpg",
+        original_filename="card_61.jpg",
+        pairing_key="card_61",
+        side=ScanSide.front,
+        status=ScanStatus.pending,
+    )
+    db.add(scan)
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        export_batch_zip(batch_id=6, db=db, _user=None)
+    assert exc_info.value.status_code == 409
+    assert "pipeline is not complete" in exc_info.value.detail
+
+    # 2. Batch in rotation_review (crop unconfirmed)
+    scan.status = ScanStatus.cropped
+    crop = CardCrop(
+        id=601,
+        raw_scan_id=61,
+        r2_key_cropped="cropped/6/601.jpg",
+        rotation_degrees=0,
+        rotation_confirmed_at=None,
+    )
+    db.add(crop)
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        export_batch_zip(batch_id=6, db=db, _user=None)
+    assert exc_info.value.status_code == 409
+    assert "current status: rotation_review" in exc_info.value.detail
+

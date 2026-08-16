@@ -62,6 +62,7 @@ class BatchCountsOut(BaseModel):
     crop_failed: int
     pending_rotation: int
     pending_duplicate_review: int
+    total_duplicate_candidates: int = 0
 
 
 class BatchDetailOut(BatchOut):

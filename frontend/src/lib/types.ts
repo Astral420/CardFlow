@@ -37,6 +37,7 @@ export interface Batch {
   created_at: string;
   source_label: string | null;
   status: BatchStatus;
+  counts?: BatchCounts;
 }
 
 export interface BatchCounts {
@@ -46,6 +47,7 @@ export interface BatchCounts {
   crop_failed: number;
   pending_rotation: number;
   pending_duplicate_review: number;
+  total_duplicate_candidates?: number;
 }
 
 export interface BatchDetail extends Batch {
