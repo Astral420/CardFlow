@@ -81,9 +81,28 @@ class Settings(BaseSettings):
     crop_output_height: int = 1050
     expected_card_aspect_ratio: float = 3.5 / 2.5
     aspect_ratio_tolerance: float = 0.15  # tune empirically, see spec Section 11
-    crop_padding_fraction: float = 0.07
-    crop_padding_min_pixels: int = 10
+    crop_padding_fraction: float = 0.04
+    crop_padding_min_pixels: int = 5
     scan_background_threshold: int = 8
+
+    # Post-warp crop refinement (spec: Front/Back Tolerance + Crop
+    # Refinement plan, Phase 1). The padding above intentionally still
+    # overshoots a bit -- generous padding is what keeps genuinely dark
+    # card edges from being mistaken for scan-bed background during
+    # contour detection. This step trims that overshoot back out *after*
+    # the perspective warp, so we get safe detection and a clean, near
+    # edge-to-edge output at the same time.
+    crop_refine_enabled: bool = True
+    # Pixels darker than this (0-255, grayscale) are treated as residual
+    # scan-bed / toploader-margin background to trim. Tuned above scan-bed
+    # noise (0-5) and below even the darkest real card borders seen in
+    # inventory so far (15-30+).
+    crop_refine_bg_threshold: int = 12
+    # Safety cap: never trim more than this fraction of a dimension from
+    # any single edge, regardless of what the border scan finds. Guards
+    # against a pathological input (e.g. a mostly-black photo) eating the
+    # card itself.
+    crop_refine_max_trim_fraction: float = 0.15
 
     # Already-cropped input detection (spec Section 6.2 addendum). Some
     # intake sources (e.g. a scanner that auto-crops on-device) hand us

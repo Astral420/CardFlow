@@ -92,6 +92,61 @@ def _perimeter_background_fraction(gray: np.ndarray, threshold: int) -> float:
     return float(np.count_nonzero(perimeter <= threshold)) / perimeter.size
 
 
+def _refine_warped_crop(warped: np.ndarray) -> np.ndarray:
+    """Trim residual scan-bed / toploader border from a perspective-warped
+    (or already-cropped/passthrough) image.
+
+    Detection padding intentionally overshoots the card a bit -- see the
+    crop_padding_fraction comment in app.config -- so the crop this
+    function receives can still have thin bands of near-black scan bed (or,
+    on the passthrough path, a toploader margin) on one or more edges. This
+    scans inward from each edge to find where card content begins, trims to
+    that inner rectangle, and returns it.
+
+    Uses the median pixel value per row/column (robust to isolated bright
+    glare pixels off a toploader/sleeve, unlike a mean) and caps trimming at
+    a configurable fraction of each dimension so a pathological input (e.g.
+    a mostly-black photo) can't eat into the card itself.
+    """
+    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
+    threshold = settings.crop_refine_bg_threshold
+    max_trim = settings.crop_refine_max_trim_fraction
+
+    max_trim_v = int(h * max_trim)
+    max_trim_h = int(w * max_trim)
+
+    top = 0
+    for row in range(max_trim_v):
+        if np.median(gray[row, :].astype(float)) > threshold:
+            break
+        top = row + 1
+
+    bottom = h
+    for row in range(h - 1, h - 1 - max_trim_v, -1):
+        if np.median(gray[row, :].astype(float)) > threshold:
+            break
+        bottom = row
+
+    left = 0
+    for col in range(max_trim_h):
+        if np.median(gray[:, col].astype(float)) > threshold:
+            break
+        left = col + 1
+
+    right = w
+    for col in range(w - 1, w - 1 - max_trim_h, -1):
+        if np.median(gray[:, col].astype(float)) > threshold:
+            break
+        right = col
+
+    # Safety: if trimming would produce an invalid rect, return unchanged.
+    if top >= bottom or left >= right:
+        return warped
+
+    return warped[top:bottom, left:right]
+
+
 def _passthrough_crop(image: np.ndarray) -> CropResult:
     """Build a CropResult for input that's already cropped to the card.
 
@@ -103,7 +158,17 @@ def _passthrough_crop(image: np.ndarray) -> CropResult:
     spurious rotation/flip into an image that was already sitting upright.
     Pass the pixels through untouched (re-encoding only) and validate
     against a tolerance meant for input we didn't crop ourselves.
+
+    Some already-cropped sources still leave a thin toploader/sleeve margin
+    around the card -- refine (trim) that out first, before any of the
+    below is computed, so the aspect ratio, orientation, bbox, and encoded
+    output all agree on the same, final pixel dimensions rather than the
+    aspect/orientation/bbox describing pre-trim geometry that no longer
+    matches what's actually returned.
     """
+    if settings.crop_refine_enabled:
+        image = _refine_warped_crop(image)
+
     height, width = image.shape[:2]
     long_side = max(width, height)
     short_side = min(width, height)
@@ -232,7 +297,7 @@ def _score_contour(
 
 
 def _best_contour(contours: list[np.ndarray], image_shape: tuple[int, ...]) -> np.ndarray:
-    image_area = int(image_shape[0] * image_shape[1])
+    image_area = image_shape[0] * image_shape[1]
     min_area = image_area * 0.005
     candidates = [c for c in contours if cv2.contourArea(c) >= min_area]
     if not candidates:
@@ -348,6 +413,18 @@ def auto_crop(image_bytes: bytes) -> CropResult:
     )
     matrix = cv2.getPerspectiveTransform(ordered, dst)
     warped = cv2.warpPerspective(image, matrix, (out_w, out_h))
+
+    # Trim residual scan-bed border left by the detection padding above,
+    # then rescale back to the fixed output canvas size -- aspect_ratio/
+    # orientation/bbox below describe the *pre*-trim detected rectangle
+    # (that's the actual detection result being validated), so this only
+    # needs to affect the encoded pixels, not those fields.
+    if settings.crop_refine_enabled:
+        trimmed = _refine_warped_crop(warped)
+        if trimmed.shape[:2] != (out_h, out_w):
+            warped = cv2.resize(trimmed, (out_w, out_h), interpolation=cv2.INTER_AREA)
+        else:
+            warped = trimmed
 
     ok, buf = cv2.imencode(".jpg", warped, [cv2.IMWRITE_JPEG_QUALITY, 95])
     if not ok:

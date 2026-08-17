@@ -75,7 +75,7 @@ def color_distance(sig_a: list[float], sig_b: list[float]) -> float:
     """Bhattacharyya distance between two color signatures (0 = identical)."""
     a = np.asarray(sig_a, dtype=np.float32)
     b = np.asarray(sig_b, dtype=np.float32)
-    return float(cv2.compareHist(a, b, cv2.HISTCMP_BHATTACHARYYA))
+    return cv2.compareHist(a, b, cv2.HISTCMP_BHATTACHARYYA)
 
 
 def hash_and_color_at_all_rotations(

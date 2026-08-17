@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from PIL import Image
 from app.config import settings
-from app.vision.crop import auto_crop
+from app.vision.crop import _refine_warped_crop, auto_crop
 
 
 def _polygon_area(points: list[list[float]]) -> float:
@@ -441,15 +441,31 @@ def test_auto_crop_dark_bordered_precrop_still_accepted_via_fallback():
     # coincidentally-passing strict check.
     assert abs(result.aspect_ratio - settings.expected_card_aspect_ratio) > settings.aspect_ratio_tolerance
 
-    # Falls back to the same untouched-passthrough behavior as the fast
-    # path: no perspective warp, no resize, marker stays top-left.
+    # Falls back to the same passthrough behavior as the fast path: no
+    # perspective warp, no forced resize to the fixed output canvas, marker
+    # stays top-left. Post-warp crop refinement (settings.crop_refine_*)
+    # still applies on this path though, since this fixture's dark border
+    # is exactly the toploader-margin case it's meant to catch -- so the
+    # output is a few pixels smaller than the input, not byte-identical.
     decoded = cv2.imdecode(
         np.frombuffer(result.image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR
     )
-    assert decoded.shape[1] == width
-    assert decoded.shape[0] == height
+    assert decoded.shape[1] < width
+    assert decoded.shape[0] < height
+    # ... but refinement only trims the thin dark border this fixture set
+    # up (see _make_dark_bordered_precropped_bytes), not the card itself --
+    # anything more would indicate over-trimming.
+    assert decoded.shape[1] > width * 0.95
+    assert decoded.shape[0] > height * 0.95
     marker_region = decoded[0:20, 0:20]
     assert int(marker_region[:, :, 0].mean()) < 50
+
+    # Regression guard for a bug caught in review: aspect_ratio/orientation
+    # must describe the actual (post-trim) output, not stale pre-trim
+    # geometry -- since aspect_ratio_ok gates crop_failed in tasks/crop.py.
+    long_side = max(decoded.shape[1], decoded.shape[0])
+    short_side = min(decoded.shape[1], decoded.shape[0])
+    assert result.aspect_ratio == pytest.approx(long_side / short_side)
 
 
 def test_auto_crop_dark_bordered_precrop_still_flags_wildly_wrong_ratio():
@@ -474,3 +490,97 @@ def test_auto_crop_laminated_card_does_not_trigger_full_frame_fallback():
         np.frombuffer(result.image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR
     )
     assert (decoded.shape[1], decoded.shape[0]) in {(750, 1050), (1050, 750)}
+
+
+# --- Phase 1: post-warp crop refinement (_refine_warped_crop) ---
+#
+# _refine_warped_crop trims residual scan-bed / toploader-margin border
+# left over from the detection padding (see crop_padding_fraction in
+# app.config), after the perspective warp has already run. These tests
+# exercise it directly, isolated from contour detection.
+
+
+def _bordered_image(
+    canvas_size: int = 300,
+    border: int = 15,
+    bg_val: int = 0,
+    fg_val: int = 200,
+) -> np.ndarray:
+    """A solid `fg_val` square with a `border`-px ring of `bg_val` around it."""
+    img = np.full((canvas_size, canvas_size, 3), bg_val, dtype=np.uint8)
+    img[border : canvas_size - border, border : canvas_size - border] = fg_val
+    return img
+
+
+def test_refine_warped_crop_trims_black_border():
+    img = _bordered_image(canvas_size=300, border=15, bg_val=0, fg_val=200)
+    trimmed = _refine_warped_crop(img)
+    assert trimmed.shape[:2] == (270, 270)  # 300 - 2*15 on each dimension
+    # What's left should be uniformly foreground, no background sliver.
+    assert int(trimmed.mean()) > 150
+
+
+def test_refine_warped_crop_preserves_borderless_image():
+    img = np.full((200, 200, 3), 180, dtype=np.uint8)  # uniform, no border at all
+    trimmed = _refine_warped_crop(img)
+    assert trimmed.shape == img.shape
+    assert np.array_equal(trimmed, img)
+
+
+def test_refine_warped_crop_respects_max_trim_fraction():
+    # Uniformly dark -- median of every row/col reads as background, so
+    # naive trimming would eat the whole image. The max_trim_fraction cap
+    # must stop that well short of emptying it.
+    img = np.full((200, 200, 3), 2, dtype=np.uint8)
+    trimmed = _refine_warped_crop(img)
+    max_trim = settings.crop_refine_max_trim_fraction
+    min_expected_dim = 200 * (1 - 2 * max_trim)
+    assert trimmed.shape[0] >= min_expected_dim - 1
+    assert trimmed.shape[1] >= min_expected_dim - 1
+    assert trimmed.size > 0
+
+
+def test_refine_warped_crop_handles_dark_card_border():
+    # Near-black scan bed (value 2) around a card whose *own* border is
+    # genuinely dark (value 20, e.g. a black-framed Mosaic/Zenith card) but
+    # still safely above crop_refine_bg_threshold (12) -- only the scan bed
+    # should get trimmed, not the card's own dark frame.
+    canvas_size = 300
+    bed_border = 20
+    card_border = 15
+    img = np.full((canvas_size, canvas_size, 3), 2, dtype=np.uint8)
+    inner = canvas_size - 2 * bed_border
+    img[bed_border : bed_border + inner, bed_border : bed_border + inner] = 20
+    art_inset = card_border
+    img[
+        bed_border + art_inset : bed_border + inner - art_inset,
+        bed_border + art_inset : bed_border + inner - art_inset,
+    ] = 220
+
+    trimmed = _refine_warped_crop(img)
+    # Scan bed gone: output shouldn't be much bigger than the card region.
+    assert trimmed.shape[0] <= inner + 4
+    assert trimmed.shape[1] <= inner + 4
+    # The card's own dark border survived -- edge pixels of the trimmed
+    # output should read as the card border (~20), not bright artwork.
+    edge_strip = trimmed[0:5, :]
+    assert int(edge_strip.mean()) < 60
+
+
+def test_auto_crop_produces_edge_to_edge_output():
+    # End-to-end: a raw scan run through the full auto_crop pipeline should
+    # come out with a negligible residual scan-bed border, not the ~20%
+    # baked-in waste the padding alone used to leave (see plan's Problem
+    # section). Card is well inset from the frame so this exercises normal
+    # contour detection + refinement, not the passthrough path.
+    image_bytes = _make_scan_bytes(card_w=250, card_h=350, canvas_size=400)
+    result = auto_crop(image_bytes)
+    decoded = cv2.imdecode(
+        np.frombuffer(result.image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR
+    )
+    gray = cv2.cvtColor(decoded, cv2.COLOR_BGR2GRAY)
+    # Residual border fraction on each edge -- should be a thin sliver
+    # (rescale/interpolation seam) rather than the old ~7-11% per edge.
+    threshold = settings.crop_refine_bg_threshold
+    top_dark = np.count_nonzero(np.median(gray[:5, :].astype(float), axis=1) <= threshold)
+    assert top_dark <= 2
