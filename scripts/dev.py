@@ -111,36 +111,57 @@ def step_run_services(python_bin: Path, celery_bin: Path, npm_bin: str, is_windo
     print("\nPress Ctrl+C to stop all services.\n")
 
     processes = []
+    # Track Uvicorn separately so we can restart it on reload exits
+    uvicorn_entry = None
+
     try:
         p_uvicorn = subprocess.Popen(uvicorn_cmd, cwd=BACKEND_DIR)
-        processes.append(("Uvicorn", p_uvicorn))
+        uvicorn_entry = ["Uvicorn", p_uvicorn]
+        processes.append(uvicorn_entry)
 
         p_celery = subprocess.Popen(celery_cmd, cwd=BACKEND_DIR)
-        processes.append(("Celery", p_celery))
+        processes.append(["Celery", p_celery])
 
         p_frontend = subprocess.Popen(frontend_cmd, cwd=FRONTEND_DIR)
-        processes.append(("Frontend", p_frontend))
+        processes.append(["Frontend", p_frontend])
 
         # Monitor processes
         while True:
-            for name, proc in processes:
+            for entry in processes:
+                name, proc = entry
                 ret = proc.poll()
-                if ret is not None:
-                    print(f"\n[!] Process {name} exited with return code {ret}.")
+                if ret is None:
+                    continue
+
+                if name == "Uvicorn":
+                    # Exit code 3 = Uvicorn triggered an internal reload; restart it.
+                    # Any other exit code is a real crash — shut everything down.
+                    if ret == 3:
+                        print(f"[i] Uvicorn reloading (exit code 3). Restarting...")
+                        new_proc = subprocess.Popen(uvicorn_cmd, cwd=BACKEND_DIR)
+                        entry[1] = new_proc  # update in-place so finally sees it
+                    else:
+                        print(f"\n[!] Uvicorn crashed (exit code {ret}). Shutting down all services.")
+                        return
+                else:
+                    print(f"\n[!] Process '{name}' exited unexpectedly (exit code {ret}). Shutting down all services.")
                     return
+
             time.sleep(0.5)
 
     except KeyboardInterrupt:
         print("\n\n[i] KeyboardInterrupt received. Shutting down development services...")
     finally:
-        for name, proc in processes:
+        for entry in processes:
+            name, proc = entry
             if proc.poll() is None:
                 print(f"[i] Terminating {name} (PID {proc.pid})...")
                 proc.terminate()
 
         # Wait briefly for graceful shutdown, then kill if still running
         time.sleep(1)
-        for name, proc in processes:
+        for entry in processes:
+            name, proc = entry
             if proc.poll() is None:
                 print(f"[!] Force killing {name} (PID {proc.pid})...")
                 proc.kill()
