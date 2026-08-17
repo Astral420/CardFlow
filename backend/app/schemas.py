@@ -58,9 +58,11 @@ class BatchCreateResponse(BaseModel):
 class BatchCountsOut(BaseModel):
     scans: int
     cropped: int
+    skipped: int
     crop_failed: int
     pending_rotation: int
     pending_duplicate_review: int
+    total_duplicate_candidates: int = 0
 
 
 class BatchDetailOut(BatchOut):
@@ -74,7 +76,13 @@ class RawScanOut(BaseModel):
     status: ScanStatus
     thumbnail_url: str | None = None
     rotation_degrees: int = 0
+    # True for either confirmed_duplicate or intentional_duplicate --
+    # "this scan matched another card in the batch". See
+    # is_intentional_duplicate to tell the two apart.
     is_duplicate: bool = False
+    # True only for intentional_duplicate: acknowledged as a match but NOT
+    # excluded from the batch export (unlike confirmed_duplicate).
+    is_intentional_duplicate: bool = False
 
 
 class CropQueueItemOut(BaseModel):
@@ -117,6 +125,15 @@ class CardPairOut(BaseModel):
 
 class DuplicateCandidateOut(BaseModel):
     candidate_id: int
+    # Both crops in a pair always belong to the same batch (duplicate
+    # detection only ever compares within-batch, see
+    # app.dedup.matching.find_within_batch_duplicates), so a single
+    # batch_id/source_label pair describes the whole candidate -- lets the
+    # duplicate review queue (intentionally global, not batch-scoped -- see
+    # app.api.duplicates._next_pending) show which batch is being reviewed.
+    batch_id: int
+    source_label: str | None
+    status: DuplicateStatus
     structural_score: float | None
     color_score: float | None
     filename_match: bool
@@ -161,11 +178,17 @@ class BatchDuplicateCropOut(BaseModel):
 
 
 class BatchDuplicatePairOut(BaseModel):
-    """A confirmed duplicate pair surfaced in the batch duplicates log."""
+    """A resolved (confirmed or intentional) duplicate pair surfaced in the
+    batch duplicates log."""
     candidate_id: int
+    status: DuplicateStatus  # confirmed_duplicate or intentional_duplicate
     structural_score: float | None
     color_score: float | None
     filename_match: bool
-    kept: BatchDuplicateCropOut    # card_crop_a — the one that stays
-    removed: BatchDuplicateCropOut  # card_crop_b — the one excluded from export
+    kept: BatchDuplicateCropOut
+    # card_crop_b. Named "removed" from the confirmed_duplicate era, kept
+    # for frontend compatibility -- for status=intentional_duplicate this
+    # side is NOT actually excluded from export, see
+    # app.api.batches.export_batch_zip.
+    removed: BatchDuplicateCropOut
 

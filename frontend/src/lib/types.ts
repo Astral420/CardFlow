@@ -12,9 +12,13 @@ export type BatchStatus =
 
 export type ScanSide = "front" | "back";
 
-export type ScanStatus = "pending" | "cropped" | "crop_failed";
+export type ScanStatus = "pending" | "cropped" | "skipped" | "crop_failed";
 
-export type DuplicateStatus = "pending" | "confirmed_duplicate" | "rejected";
+export type DuplicateStatus =
+  | "pending"
+  | "confirmed_duplicate"
+  | "intentional_duplicate"
+  | "rejected";
 
 export interface User {
   id: number;
@@ -33,14 +37,17 @@ export interface Batch {
   created_at: string;
   source_label: string | null;
   status: BatchStatus;
+  counts?: BatchCounts;
 }
 
 export interface BatchCounts {
   scans: number;
   cropped: number;
+  skipped: number;
   crop_failed: number;
   pending_rotation: number;
   pending_duplicate_review: number;
+  total_duplicate_candidates?: number;
 }
 
 export interface BatchDetail extends Batch {
@@ -55,6 +62,7 @@ export interface RawScan {
   thumbnail_url: string | null;
   rotation_degrees: number;
   is_duplicate: boolean;
+  is_intentional_duplicate: boolean;
 }
 
 export interface CropQueueItem {
@@ -85,7 +93,13 @@ export interface CardPair {
 
 export interface DuplicateCandidate {
   candidate_id: number;
-  status: string;
+  // Both crops in a pair always belong to the same batch (duplicate
+  // detection only ever compares within-batch); lets the review queue
+  // (intentionally global, not batch-scoped) show which batch is being
+  // reviewed.
+  batch_id: number;
+  source_label: string | null;
+  status: DuplicateStatus;
   structural_score: number | null;
   color_score: number | null;
   filename_match: boolean;
@@ -126,11 +140,15 @@ export interface BatchDuplicateCrop {
 
 export interface BatchDuplicatePair {
   candidate_id: number;
+  status: DuplicateStatus; // confirmed_duplicate or intentional_duplicate
   structural_score: number | null;
   color_score: number | null;
   filename_match: boolean;
   kept: BatchDuplicateCrop;    // card_crop_a — stays in export
-  removed: BatchDuplicateCrop; // card_crop_b — excluded from export
+  // card_crop_b. For status="confirmed_duplicate" this side is excluded
+  // from export; for status="intentional_duplicate" it is NOT (both sides
+  // ship — see backend app.api.batches.export_batch_zip).
+  removed: BatchDuplicateCrop;
 }
 
 

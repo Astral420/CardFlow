@@ -11,6 +11,19 @@ card (e.g. a scanner that auto-crops on-device) rather than a raw shot of
 the whole scan bed. Those are detected up front, before contour detection
 runs, and short-circuited to a passthrough path -- see
 `_perimeter_background_fraction` / `_passthrough_crop` below.
+
+That fast, perimeter-based check is a proxy (a real raw scan's outermost
+pixels are almost all background), and proxies have blind spots: a
+pre-cropped image whose card art itself runs dark right to the edge (e.g. a
+black-bordered foil/chrome card) can read as enough "background" along its
+border to miss the passthrough cutoff even though there's no actual scan
+bed to find. Rather than loosen that cutoff -- real raw scans and this edge
+case overlap in the same range, so a looser cutoff risks the opposite,
+much worse failure of treating a genuine raw scan as pre-cropped and never
+cropping it -- `auto_crop` also checks a second, independent signal after
+contour detection runs: if the detected box still covers essentially the
+whole frame, there was nothing to crop away regardless of what the
+perimeter heuristic said. See `_full_frame_area_fraction` below.
 """
 
 from dataclasses import dataclass
@@ -31,6 +44,13 @@ class CropResult:
     aspect_ratio: float
     aspect_ratio_ok: bool
     orientation: str
+    # True when this image was judged to already be cropped tight to the
+    # card -- either via the fast perimeter-background check up front, or
+    # via the post-contour full-frame-area fallback below -- and therefore
+    # graded against precropped_aspect_ratio_tolerance instead of
+    # aspect_ratio_tolerance. Callers use this to label the scan `skipped`
+    # (no crop transform was needed) instead of `cropped`.
+    already_cropped: bool = False
 
 
 def _order_points(pts: np.ndarray) -> np.ndarray:
@@ -72,6 +92,61 @@ def _perimeter_background_fraction(gray: np.ndarray, threshold: int) -> float:
     return float(np.count_nonzero(perimeter <= threshold)) / perimeter.size
 
 
+def _refine_warped_crop(warped: np.ndarray) -> np.ndarray:
+    """Trim residual scan-bed / toploader border from a perspective-warped
+    (or already-cropped/passthrough) image.
+
+    Detection padding intentionally overshoots the card a bit -- see the
+    crop_padding_fraction comment in app.config -- so the crop this
+    function receives can still have thin bands of near-black scan bed (or,
+    on the passthrough path, a toploader margin) on one or more edges. This
+    scans inward from each edge to find where card content begins, trims to
+    that inner rectangle, and returns it.
+
+    Uses the median pixel value per row/column (robust to isolated bright
+    glare pixels off a toploader/sleeve, unlike a mean) and caps trimming at
+    a configurable fraction of each dimension so a pathological input (e.g.
+    a mostly-black photo) can't eat into the card itself.
+    """
+    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
+    threshold = settings.crop_refine_bg_threshold
+    max_trim = settings.crop_refine_max_trim_fraction
+
+    max_trim_v = int(h * max_trim)
+    max_trim_h = int(w * max_trim)
+
+    top = 0
+    for row in range(max_trim_v):
+        if np.median(gray[row, :].astype(float)) > threshold:
+            break
+        top = row + 1
+
+    bottom = h
+    for row in range(h - 1, h - 1 - max_trim_v, -1):
+        if np.median(gray[row, :].astype(float)) > threshold:
+            break
+        bottom = row
+
+    left = 0
+    for col in range(max_trim_h):
+        if np.median(gray[:, col].astype(float)) > threshold:
+            break
+        left = col + 1
+
+    right = w
+    for col in range(w - 1, w - 1 - max_trim_h, -1):
+        if np.median(gray[:, col].astype(float)) > threshold:
+            break
+        right = col
+
+    # Safety: if trimming would produce an invalid rect, return unchanged.
+    if top >= bottom or left >= right:
+        return warped
+
+    return warped[top:bottom, left:right]
+
+
 def _passthrough_crop(image: np.ndarray) -> CropResult:
     """Build a CropResult for input that's already cropped to the card.
 
@@ -83,7 +158,17 @@ def _passthrough_crop(image: np.ndarray) -> CropResult:
     spurious rotation/flip into an image that was already sitting upright.
     Pass the pixels through untouched (re-encoding only) and validate
     against a tolerance meant for input we didn't crop ourselves.
+
+    Some already-cropped sources still leave a thin toploader/sleeve margin
+    around the card -- refine (trim) that out first, before any of the
+    below is computed, so the aspect ratio, orientation, bbox, and encoded
+    output all agree on the same, final pixel dimensions rather than the
+    aspect/orientation/bbox describing pre-trim geometry that no longer
+    matches what's actually returned.
     """
+    if settings.crop_refine_enabled:
+        image = _refine_warped_crop(image)
+
     height, width = image.shape[:2]
     long_side = max(width, height)
     short_side = min(width, height)
@@ -111,7 +196,32 @@ def _passthrough_crop(image: np.ndarray) -> CropResult:
         aspect_ratio=aspect_ratio,
         aspect_ratio_ok=aspect_ratio_ok,
         orientation=orientation,
+        already_cropped=True,
     )
+
+
+def _full_frame_area_fraction(box: np.ndarray, image_shape: tuple[int, ...]) -> float:
+    """Fraction of the total image area the (already padding-expanded,
+    clipped) detected box covers.
+
+    Contour detection always returns *some* box -- on a genuine raw scan
+    that's a small fraction of the frame (the card, plus padding). If it
+    instead covers essentially the entire frame, contour detection found no
+    real scan-bed background to separate from the card, which happens on
+    already-cropped input that slipped past the perimeter pre-check (e.g. a
+    dark-bordered card pushing enough near-black pixels onto its own edge).
+    That's independent evidence of the same "nothing to crop" condition the
+    perimeter check looks for, just observed after the fact instead of
+    before.
+    """
+    image_area = image_shape[0] * image_shape[1]
+    if image_area <= 0:
+        return 0.0
+    # Shoelace formula over the (already ordered) box points.
+    x = box[:, 0]
+    y = box[:, 1]
+    box_area = 0.5 * abs(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1)))
+    return float(box_area / image_area)
 
 
 def _candidate_contours(gray: np.ndarray) -> list[np.ndarray]:
@@ -187,7 +297,7 @@ def _score_contour(
 
 
 def _best_contour(contours: list[np.ndarray], image_shape: tuple[int, ...]) -> np.ndarray:
-    image_area = int(image_shape[0] * image_shape[1])
+    image_area = image_shape[0] * image_shape[1]
     min_area = image_area * 0.005
     candidates = [c for c in contours if cv2.contourArea(c) >= min_area]
     if not candidates:
@@ -260,6 +370,24 @@ def auto_crop(image_bytes: bytes) -> CropResult:
     rect = cv2.minAreaRect(contour)
     box = _expanded_box(rect, image.shape)
 
+    # Fallback already-cropped signal (see _full_frame_area_fraction):
+    # contour detection ran but found essentially the whole frame, meaning
+    # there was no real scan-bed background to separate from the card in
+    # the first place -- the same underlying condition the perimeter
+    # pre-check above is trying to catch, just missed by that heuristic
+    # (e.g. a dark-bordered card inflating the perimeter's own background
+    # count). Defer to the same passthrough path used for that case rather
+    # than trusting this box's perspective warp: minAreaRect's angle is
+    # unstable on a near-full-frame contour for exactly the same reason
+    # _passthrough_crop's docstring gives for skipping contour detection on
+    # already-cropped input entirely -- running it anyway risks introducing
+    # a spurious rotation/flip into an image that was already upright.
+    if (
+        _full_frame_area_fraction(box, image.shape)
+        >= settings.contour_full_frame_area_fraction
+    ):
+        return _passthrough_crop(image)
+
     ordered = _order_points(box)
     source_w, source_h = _side_lengths(ordered)
 
@@ -285,6 +413,18 @@ def auto_crop(image_bytes: bytes) -> CropResult:
     )
     matrix = cv2.getPerspectiveTransform(ordered, dst)
     warped = cv2.warpPerspective(image, matrix, (out_w, out_h))
+
+    # Trim residual scan-bed border left by the detection padding above,
+    # then rescale back to the fixed output canvas size -- aspect_ratio/
+    # orientation/bbox below describe the *pre*-trim detected rectangle
+    # (that's the actual detection result being validated), so this only
+    # needs to affect the encoded pixels, not those fields.
+    if settings.crop_refine_enabled:
+        trimmed = _refine_warped_crop(warped)
+        if trimmed.shape[:2] != (out_h, out_w):
+            warped = cv2.resize(trimmed, (out_w, out_h), interpolation=cv2.INTER_AREA)
+        else:
+            warped = trimmed
 
     ok, buf = cv2.imencode(".jpg", warped, [cv2.IMWRITE_JPEG_QUALITY, 95])
     if not ok:

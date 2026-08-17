@@ -15,6 +15,7 @@ import { IconButton } from '@/components/ui/icon-button'
 import { SearchBar } from '@/components/ui/search-bar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ProgressBar } from '@/components/ui/progress-bar'
+import { getBatchProgress } from '@/lib/progress'
 import { cn } from '@/lib/utils'
 import type { Batch, BatchStatus } from '@/lib/types'
 
@@ -55,19 +56,11 @@ const STATUS_PROGRESS_CLASS: Record<BatchStatus, string> = {
   complete: 'bg-accent-mint-solid',
 }
 
-function progressForStatus(status: BatchStatus) {
-  return status === 'complete' ? 100 :
-    status === 'duplicate_review' ? 80 :
-    status === 'rotation_review' ? 60 :
-    status === 'cropping' ? 40 :
-    status === 'extracting' ? 20 : 0
-}
-
 function BatchCard({ batch }: { batch: Batch }) {
   const date = new Date(batch.created_at).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric',
   })
-  const progressValue = progressForStatus(batch.status)
+  const progressValue = getBatchProgress(batch)
 
   return (
     <Link to={`/batches/${batch.id}`}>
@@ -199,7 +192,7 @@ export function BatchesPage() {
     refetchInterval: (query) => {
       const list = query.state.data ?? []
       const hasActive = list.some((b) => b.status !== 'complete')
-      return hasActive ? 3000 : false
+      return hasActive ? 1500 : false
     },
   })
 

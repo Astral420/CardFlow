@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, X, SkipForward, ImageOff, AlertTriangle, Maximize2 } from 'lucide-react'
+import { CheckCircle2, X, SkipForward, ImageOff, AlertTriangle, Maximize2, Copy } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import {
@@ -177,7 +177,7 @@ export function DuplicateReviewPage() {
   })
 
   const decideMutation = useMutation({
-    mutationFn: (status: 'confirmed_duplicate' | 'rejected') =>
+    mutationFn: (status: 'confirmed_duplicate' | 'intentional_duplicate' | 'rejected') =>
       decideDuplicate(current!.candidate_id, status),
     onSuccess: (next) => {
       queryClient.setQueryData(['duplicate-next'], next)
@@ -203,6 +203,10 @@ export function DuplicateReviewPage() {
     if (canEdit && !decideMutation.isPending && current) decideMutation.mutate('rejected')
   }, [decideMutation, current, canEdit])
 
+  const handleIntentional = useCallback(() => {
+    if (canEdit && !decideMutation.isPending && current) decideMutation.mutate('intentional_duplicate')
+  }, [decideMutation, current, canEdit])
+
   const handleSkip = useCallback(() => {
     skipMutation.mutate()
   }, [skipMutation])
@@ -213,11 +217,12 @@ export function DuplicateReviewPage() {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
       if (e.code === 'KeyD') handleConfirm()
       if (e.code === 'KeyR') handleReject()
+      if (e.code === 'KeyI') handleIntentional()
       if (e.code === 'Space') { e.preventDefault(); handleSkip() }
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [handleConfirm, handleReject, handleSkip])
+  }, [handleConfirm, handleReject, handleIntentional, handleSkip])
 
   const isEmpty = !isLoading && !current
 
@@ -240,10 +245,21 @@ export function DuplicateReviewPage() {
         title="Duplicate Review"
         description="Compare flagged card pairs and decide if they are duplicates."
         actions={
-          queueCount && queueCount.count > 0 ? (
-            <Badge variant="peach" className="text-body px-3 py-1.5">
-              {queueCount.count} remaining
-            </Badge>
+          current || (queueCount && queueCount.count > 0) ? (
+            <div className="flex items-center gap-2">
+              {current && (
+                <Link to={`/batches/${current.batch_id}`}>
+                  <Badge variant="blue" className="text-body px-3 py-1.5 hover:opacity-80">
+                    {current.source_label ?? `Batch #${current.batch_id}`}
+                  </Badge>
+                </Link>
+              )}
+              {queueCount && queueCount.count > 0 && (
+                <Badge variant="peach" className="text-body px-3 py-1.5">
+                  {queueCount.count} remaining
+                </Badge>
+              )}
+            </div>
           ) : undefined
         }
       />
@@ -317,6 +333,7 @@ export function DuplicateReviewPage() {
                 <Card className="space-y-2 p-4">
                   <SectionLabel className="mb-2">Shortcuts</SectionLabel>
                   <ShortcutHint keys={['D']} label="Confirm duplicate" />
+                  <ShortcutHint keys={['I']} label="Mark intentional" />
                   <ShortcutHint keys={['R']} label="Not a duplicate" />
                   <ShortcutHint keys={['Space']} label="Skip" />
                 </Card>
@@ -347,6 +364,18 @@ export function DuplicateReviewPage() {
             <CheckCircle2 className="h-4 w-4" />
             {decideMutation.isPending ? 'Saving...' : 'Confirm Duplicate'}
             <ShortcutHint keys={['D']} label="" className="ml-1" />
+          </Button>
+          <Button
+            variant="subtle"
+            size="md"
+            onClick={handleIntentional}
+            disabled={!canEdit || decideMutation.isPending}
+            className="gap-2 min-w-[180px]"
+            title="Same card, kept on purpose (e.g. multiple copies in inventory) — both sides still export."
+          >
+            <Copy className="h-4 w-4" />
+            Mark Intentional
+            <ShortcutHint keys={['I']} label="" className="ml-1" />
           </Button>
           <Button
             variant="secondary"

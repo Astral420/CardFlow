@@ -28,12 +28,16 @@ import type { BatchDuplicatePair, RawScan } from '@/lib/types'
 // --- All-Scans tab ---
 
 function ScanThumbnail({ scan, onClick }: { scan: RawScan; onClick: () => void }) {
+  // Dimming visually implies "excluded from export" -- only true for
+  // confirmed_duplicate. An intentional_duplicate ships both sides, so it
+  // must not look de-emphasized the same way.
+  const isExcludedDuplicate = scan.is_duplicate && !scan.is_intentional_duplicate
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.97 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.16 }}
-      className={`group relative cursor-pointer overflow-hidden rounded-xl border bg-muted transition-all duration-150 hover:-translate-y-px hover:shadow-soft ${scan.is_duplicate ? 'border-accent-rose-solid/40 opacity-50' : 'border-border'
+      className={`group relative cursor-pointer overflow-hidden rounded-xl border bg-muted transition-all duration-150 hover:-translate-y-px hover:shadow-soft ${isExcludedDuplicate ? 'border-accent-rose-solid/40 opacity-50' : scan.is_intentional_duplicate ? 'border-accent-lavender-solid/40' : 'border-border'
         }`}
       onClick={onClick}
       role="button"
@@ -73,8 +77,11 @@ function ScanThumbnail({ scan, onClick }: { scan: RawScan; onClick: () => void }
       {/* Duplicate chip — top-left */}
       {scan.is_duplicate && (
         <div className="absolute left-3 top-3 pointer-events-none select-none">
-          <span className="inline-flex items-center rounded-md bg-slate-950/80 px-2 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-wider leading-none text-accent-rose-solid backdrop-blur-md border border-slate-700/60 shadow-md">
-            Dup
+          <span
+            className={`inline-flex items-center rounded-md bg-slate-950/80 px-2 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-wider leading-none backdrop-blur-md border border-slate-700/60 shadow-md ${scan.is_intentional_duplicate ? 'text-accent-lavender-solid' : 'text-accent-rose-solid'
+              }`}
+          >
+            {scan.is_intentional_duplicate ? 'Dupe (kept)' : 'Dupe'}
           </span>
         </div>
       )}
@@ -155,7 +162,9 @@ function InspectorDrawer({ scan, onClose }: { scan: RawScan; onClose: () => void
             {scan.is_duplicate && (
               <div className="flex items-center justify-between px-3.5 py-2.5">
                 <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Duplicate</span>
-                <Badge variant="rose">Confirmed</Badge>
+                <Badge variant={scan.is_intentional_duplicate ? 'lavender' : 'rose'}>
+                  {scan.is_intentional_duplicate ? 'Intentional' : 'Confirmed'}
+                </Badge>
               </div>
             )}
 
@@ -181,7 +190,7 @@ function InspectorDrawer({ scan, onClose }: { scan: RawScan; onClose: () => void
           </div>
         </div>
       </DialogContent>
-      
+
       {scan.thumbnail_url && (
         <FullscreenLightbox
           isOpen={isLightboxOpen}
@@ -223,6 +232,7 @@ function ScoreBar({ label, value }: { label: string; value: number | null }) {
 }
 
 function DuplicatePairCard({ pair }: { pair: BatchDuplicatePair }) {
+  const isIntentional = pair.status === 'intentional_duplicate'
   const avgScore =
     pair.structural_score != null && pair.color_score != null
       ? (pair.structural_score + pair.color_score) / 2
@@ -254,6 +264,9 @@ function DuplicatePairCard({ pair }: { pair: BatchDuplicatePair }) {
           <span className="text-caption font-semibold text-primary truncate">
             Candidate #{pair.candidate_id}
           </span>
+          <Badge variant={isIntentional ? 'lavender' : 'rose'} className="text-[10px] shrink-0">
+            {isIntentional ? 'Intentional — both kept' : 'Confirmed — excluded from export'}
+          </Badge>
           {pair.filename_match && (
             <Badge variant="blue" className="text-[10px] shrink-0">Filename match</Badge>
           )}
@@ -297,19 +310,27 @@ function DuplicatePairCard({ pair }: { pair: BatchDuplicatePair }) {
           <ArrowRight className="h-4 w-4 text-muted-foreground/40" />
         </div>
 
-        {/* Removed */}
-        <div className="flex-1 p-4 space-y-3 border-l border-border bg-accent-rose/10">
+        {/* Removed (confirmed_duplicate) / Also kept (intentional_duplicate) */}
+        <div
+          className={`flex-1 p-4 space-y-3 border-l border-border ${isIntentional ? 'bg-accent-lavender/10' : 'bg-accent-rose/10'
+            }`}
+        >
           <div className="flex items-center gap-2">
-            <AlertTriangle className="h-3.5 w-3.5 text-accent-rose-foreground" />
-            <SectionLabel>Removed</SectionLabel>
-            <Badge variant="rose" className="text-[10px]">{pair.removed.side}</Badge>
+            {isIntentional ? (
+              <Copy className="h-3.5 w-3.5 text-accent-lavender-foreground" />
+            ) : (
+              <AlertTriangle className="h-3.5 w-3.5 text-accent-rose-foreground" />
+            )}
+            <SectionLabel>{isIntentional ? 'Also kept' : 'Removed'}</SectionLabel>
+            <Badge variant={isIntentional ? 'lavender' : 'rose'} className="text-[10px]">{pair.removed.side}</Badge>
           </div>
           {pair.removed.image_url ? (
             <RotatedImage
               src={pair.removed.image_url}
               alt={pair.removed.original_filename}
               rotationDegrees={pair.removed.rotation_degrees}
-              className="aspect-[2.5/3.5] w-full rounded-lg border border-accent-rose-solid/30 opacity-70"
+              className={`aspect-[2.5/3.5] w-full rounded-lg border ${isIntentional ? 'border-accent-lavender-solid/30' : 'border-accent-rose-solid/30 opacity-70'
+                }`}
             />
           ) : (
             <div className="flex aspect-[2.5/3.5] w-full items-center justify-center rounded-lg border border-border bg-muted">
@@ -378,7 +399,7 @@ export function BatchDetailPage() {
     enabled: !!batchId,
     refetchInterval: (query) => {
       const b = query.state.data
-      return b && b.status !== 'complete' ? 2500 : false
+      return b && b.status !== 'complete' ? 1500 : false
     },
   })
 
@@ -387,7 +408,7 @@ export function BatchDetailPage() {
     queryFn: () => getBatchScans(batchId),
     enabled: !!batchId,
     refetchInterval: () => {
-      return batch && batch.status !== 'complete' ? 2500 : false
+      return batch && batch.status !== 'complete' ? 1500 : false
     },
   })
 
@@ -419,12 +440,17 @@ export function BatchDetailPage() {
   }
 
   const progressValue = batch ? getBatchProgress(batch) : 0
+  const isPipelineComplete = batch?.status === 'complete'
 
   const showForceAdvance =
     batch?.status === 'cropping' &&
-    (batch.counts.crop_failed > 0 || batch.counts.cropped > 0)
+    (batch.counts.crop_failed > 0 || batch.counts.cropped > 0 || batch.counts.skipped > 0)
 
-  const hasCroppedImages = (batch?.counts.cropped ?? 0) > 0
+  // `skipped` scans (already properly cropped, crop transform was a no-op)
+  // have a valid exportable image just like `cropped` ones do -- a batch
+  // made up entirely of pre-cropped scans would otherwise hide the Export
+  // button entirely.
+  const hasCroppedImages = ((batch?.counts.cropped ?? 0) + (batch?.counts.skipped ?? 0)) > 0
   const duplicateCount = duplicates?.length ?? 0
 
   // Sort scans: card number naturally (1, 2, 10 not 1, 10, 2), then front before back
@@ -474,8 +500,13 @@ export function BatchDetailPage() {
                   variant="secondary"
                   size="sm"
                   onClick={handleExport}
-                  disabled={isExporting}
+                  disabled={isExporting || !isPipelineComplete}
                   className="gap-2"
+                  title={
+                    !isPipelineComplete
+                      ? `Download blocked: pipeline status is "${batch.status}". Complete all stages to export.`
+                      : undefined
+                  }
                 >
                   {isExporting ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -543,10 +574,11 @@ export function BatchDetailPage() {
             )}
           </AnimatePresence>
 
-          <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-5">
+          <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
             {[
               { label: 'Total Scans', value: batch.counts.scans },
               { label: 'Cropped', value: batch.counts.cropped },
+              { label: 'Already Cropped', value: batch.counts.skipped },
               { label: 'Crop Failed', value: batch.counts.crop_failed, highlight: batch.counts.crop_failed > 0 },
               { label: 'Pending Rotation', value: batch.counts.pending_rotation },
               { label: 'Pending Dupe', value: batch.counts.pending_duplicate_review },
@@ -582,8 +614,8 @@ export function BatchDetailPage() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`relative flex items-center gap-2 px-4 py-2.5 text-body font-medium transition-colors ${activeTab === tab.id
-                  ? 'text-primary'
-                  : 'text-muted-foreground hover:text-primary'
+                ? 'text-primary'
+                : 'text-muted-foreground hover:text-primary'
                 }`}
             >
               {tab.id === 'scans' ? (
@@ -595,8 +627,8 @@ export function BatchDetailPage() {
               {tab.count != null && tab.count > 0 && (
                 <span
                   className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${tab.id === 'duplicates'
-                      ? 'bg-accent-rose text-accent-rose-foreground'
-                      : 'bg-muted text-muted-foreground'
+                    ? 'bg-accent-rose text-accent-rose-foreground'
+                    : 'bg-muted text-muted-foreground'
                     }`}
                 >
                   {tab.count}

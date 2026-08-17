@@ -20,6 +20,12 @@ class ScanSide(str, enum.Enum):
 class ScanStatus(str, enum.Enum):
     pending = "pending"
     cropped = "cropped"
+    # Auto-crop judged this image already tight to the card (e.g. a scanner
+    # that crops on-device) and within tolerance, so the crop transform was
+    # skipped entirely -- see app.vision.crop.CropResult.already_cropped.
+    # Still needs rotation review like `cropped` does; we can tell it didn't
+    # need re-cropping, not that it's already right-side up.
+    skipped = "skipped"
     crop_failed = "crop_failed"
 
 

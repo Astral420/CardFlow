@@ -131,7 +131,7 @@ export function DeleteBatchDialog({ batch, trigger }: DeleteBatchDialogProps) {
                 <p className="mt-1 truncate text-body font-medium text-primary">{batchLabel}</p>
                 <p className="mt-0.5 text-caption text-muted-foreground">
                   {batch.counts.scans} scan{batch.counts.scans !== 1 ? 's' : ''} ·{' '}
-                  {batch.counts.cropped} cropped
+                  {batch.counts.cropped + batch.counts.skipped} cropped
                 </p>
               </div>
 

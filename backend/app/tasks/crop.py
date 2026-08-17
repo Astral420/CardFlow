@@ -62,20 +62,30 @@ def _crop_scan(raw_scan_id: int) -> None:
 
             # Flag instead of silently trusting a bad crop; a human corrects it
             # via the card log / rotation review before it feeds into hashing.
-            raw_scan.status = (
-                ScanStatus.cropped if result.aspect_ratio_ok else ScanStatus.crop_failed
-            )
+            # `skipped` means the crop transform itself was a no-op (the
+            # image was already tight to the card and within tolerance) --
+            # it still proceeds to rotation review / hashing exactly like
+            # `cropped` does, see app.batch_status and app.api.rotation.
+            if not result.aspect_ratio_ok:
+                raw_scan.status = ScanStatus.crop_failed
+            elif result.already_cropped:
+                raw_scan.status = ScanStatus.skipped
+            else:
+                raw_scan.status = ScanStatus.cropped
             refresh_batch_status(db, batch_id)
             db.commit()
 
             log_event(
-                "image cropped",
+                "image cropped" if raw_scan.status != ScanStatus.skipped else "image already cropped -- crop skipped",
                 batch_id=batch_id,
                 image_name=raw_scan.original_filename,
                 aspect_ratio_ok=result.aspect_ratio_ok,
                 orientation=result.orientation,
+                already_cropped=result.already_cropped,
             )
-            redis_state.incr_counter("images_cropped")
+            redis_state.incr_counter(
+                "images_skipped" if raw_scan.status == ScanStatus.skipped else "images_cropped"
+            )
     except Exception:
         # e.g. storage.upload_bytes() raising after the db.flush() above
         # left a partial card_crop row staged on this session. Roll it back

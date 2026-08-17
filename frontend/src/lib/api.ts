@@ -1,6 +1,5 @@
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
 import type {
-  Batch,
   BatchDetail,
   BatchDuplicatePair,
   CardCrop,
@@ -191,7 +190,7 @@ export async function logout() {
 // ---- Batches ----
 
 export async function listBatches(limit = 50) {
-  const { data } = await client.get<Batch[]>("/batches", { params: { limit } });
+  const { data } = await client.get<BatchDetail[]>("/batches", { params: { limit } });
   return data;
 }
 
@@ -294,7 +293,7 @@ export async function getDuplicateQueueCount() {
 
 export async function decideDuplicate(
   candidateId: number,
-  status: "confirmed_duplicate" | "rejected"
+  status: "confirmed_duplicate" | "intentional_duplicate" | "rejected"
 ) {
   const { data } = await client.post<DuplicateCandidate | null>(
     `/review/duplicates/${candidateId}/decision`,

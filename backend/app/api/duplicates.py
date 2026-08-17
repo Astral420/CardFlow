@@ -14,8 +14,12 @@ router = APIRouter(prefix="/api/review/duplicates", tags=["duplicate-review"])
 
 
 def _to_out(db: Session, candidate: DuplicateCandidate) -> DuplicateCandidateOut:
+    batch = candidate.card_crop_a.raw_scan.batch
     return DuplicateCandidateOut(
         candidate_id=candidate.id,
+        batch_id=batch.id,
+        source_label=batch.source_label,
+        status=candidate.status,
         structural_score=finite_float_or_none(candidate.structural_score),
         color_score=finite_float_or_none(candidate.color_score),
         filename_match=candidate.filename_match,
@@ -67,6 +71,7 @@ def decide(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Candidate not found")
     if payload.status not in (
         DuplicateStatus.confirmed_duplicate,
+        DuplicateStatus.intentional_duplicate,
         DuplicateStatus.rejected,
     ):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid decision status")

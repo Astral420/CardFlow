@@ -136,6 +136,7 @@ def test_export_batch_zip_invalidation_and_pruning():
         res1 = export_batch_zip(batch_id=1, db=db, _user=None)
         assert res1.headers["X-Export-Cached"] == "false"
         old_export = db.query(BatchExport).filter_by(batch_id=1).first()
+        assert old_export is not None
         old_hash = old_export.manifest_hash
         old_key = old_export.r2_key
 
@@ -154,6 +155,62 @@ def test_export_batch_zip_invalidation_and_pruning():
         exports = db.query(BatchExport).filter_by(batch_id=1).all()
         assert len(exports) == 1
         assert exports[0].manifest_hash != old_hash
+
+
+def test_export_batch_zip_intentional_duplicate_ships_both_sides():
+    """intentional_duplicate is an acknowledged match that's expected to
+    stay in inventory as-is (e.g. genuinely holding 2 copies of the same
+    card) -- unlike confirmed_duplicate, neither side should be excluded
+    from the export."""
+    db = _make_session()
+    batch = Batch(id=4, status=BatchStatus.complete, source_label="test_batch_intentional")
+    db.add(batch)
+    scan1 = RawScan(
+        id=41,
+        batch_id=4,
+        r2_key_raw="raw/4/41.jpg",
+        original_filename="card_a.jpg",
+        pairing_key="card_a",
+        side=ScanSide.front,
+        status=ScanStatus.cropped,
+    )
+    scan2 = RawScan(
+        id=42,
+        batch_id=4,
+        r2_key_raw="raw/4/42.jpg",
+        original_filename="card_b.jpg",
+        pairing_key="card_b",
+        side=ScanSide.front,
+        status=ScanStatus.cropped,
+    )
+    db.add_all([scan1, scan2])
+    db.flush()
+
+    crop1 = CardCrop(id=401, raw_scan_id=41, r2_key_cropped="cropped/4/401.jpg")
+    crop2 = CardCrop(id=402, raw_scan_id=42, r2_key_cropped="cropped/4/402.jpg")
+    db.add_all([crop1, crop2])
+    db.flush()
+
+    dup = DuplicateCandidate(
+        card_crop_id_a=401,
+        card_crop_id_b=402,
+        status=DuplicateStatus.intentional_duplicate,
+    )
+    db.add(dup)
+    db.commit()
+
+    dummy_jpeg = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00`\x00`\x00\x00\xff\xd9"
+    with patch("app.storage.download_bytes", return_value=dummy_jpeg), \
+         patch("app.storage.upload_bytes") as mock_upload:
+        res = export_batch_zip(batch_id=4, db=db, _user=None)
+
+    assert res.status_code == 200
+    uploaded_data = mock_upload.call_args[0][1]
+    zf = zipfile.ZipFile(io.BytesIO(uploaded_data))
+    assert zf.testzip() is None
+    # Both sides of the intentional-duplicate pair shipped -- nothing
+    # excluded, unlike the confirmed_duplicate case below.
+    assert len(zf.namelist()) == 2
 
 
 def test_export_batch_zip_empty_or_all_duplicates_raises_404():
@@ -283,3 +340,47 @@ def test_delete_batch_cleans_up_cached_export():
         mock_storage.delete_object.assert_any_call(f"exports/{batch.id}/hash123.zip")
         assert db.get(Batch, batch.id) is None
         assert db.query(BatchExport).filter_by(batch_id=batch.id).first() is None
+
+
+def test_export_batch_zip_blocked_when_not_complete():
+    """Verify that export is rejected with 409 Conflict if pipeline is not complete."""
+    from fastapi import HTTPException
+
+    db = _make_session()
+    # 1. Batch in cropping with pending scans
+    batch = Batch(id=6, status=BatchStatus.cropping, source_label="incomplete_batch")
+    db.add(batch)
+    scan = RawScan(
+        id=61,
+        batch_id=6,
+        r2_key_raw="raw/6/61.jpg",
+        original_filename="card_61.jpg",
+        pairing_key="card_61",
+        side=ScanSide.front,
+        status=ScanStatus.pending,
+    )
+    db.add(scan)
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        export_batch_zip(batch_id=6, db=db, _user=None)
+    assert exc_info.value.status_code == 409
+    assert "pipeline is not complete" in exc_info.value.detail
+
+    # 2. Batch in rotation_review (crop unconfirmed)
+    scan.status = ScanStatus.cropped
+    crop = CardCrop(
+        id=601,
+        raw_scan_id=61,
+        r2_key_cropped="cropped/6/601.jpg",
+        rotation_degrees=0,
+        rotation_confirmed_at=None,
+    )
+    db.add(crop)
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        export_batch_zip(batch_id=6, db=db, _user=None)
+    assert exc_info.value.status_code == 409
+    assert "current status: rotation_review" in exc_info.value.detail
+

@@ -12,52 +12,48 @@
  * so we never show a full bar while items are still unresolved.
  */
 
-import type { BatchDetail } from './types'
+import type { Batch, BatchDetail } from './types'
 
-export function getBatchProgress(batch: BatchDetail): number {
-  const { status, counts } = batch
+export function getBatchProgress(batch: BatchDetail | Batch): number {
+  const { status } = batch
 
   if (status === 'complete') return 100
 
-  if (status === 'duplicate_review') {
-    // We need a baseline total to scale against. Use the initial pending count
-    // embedded in counts.pending_duplicate_review — when it equals the full
-    // original total we have 0% progress within this stage; as it drains we
-    // approach 98%.
-    //
-    // Guard: if pending_duplicate_review is 0 but we're still in this stage
-    // (race condition before status flips), return 98.
-    const pending = counts.pending_duplicate_review
-    if (pending === 0) return 98
+  const counts = 'counts' in batch && batch.counts ? batch.counts : undefined
+  if (!counts) {
+    return status === 'duplicate_review' ? 80 :
+      status === 'rotation_review' ? 60 :
+      status === 'cropping' ? 40 : 20
+  }
 
-    // We don't have a "total duplicates" counter on BatchCounts. The best
-    // approximation: when we enter duplicate_review, pending_duplicate_review
-    // is the total. We can only compute relative progress once we have a
-    // starting total. Since we lack that, we show 80% floor and scale by
-    // how empty the queue is relative to a synthetic max.
-    //
-    // Practical approach: treat 0 pending as 98%, anything > 0 as 80%.
-    // The bar will jump from 80→98 in one step when the queue drains.
-    // For a smoother experience we'd need the backend to track the initial
-    // total — that's an Option A concern.
-    return 80
+  if (status === 'duplicate_review') {
+    const total = counts.total_duplicate_candidates ?? counts.pending_duplicate_review
+    const pending = counts.pending_duplicate_review
+    if (total <= 0 || pending === 0) return 98
+
+    const resolved = Math.max(0, total - pending)
+    const ratio = Math.max(0, Math.min(1, resolved / total))
+    return Math.min(98, Math.round(80 + ratio * 18))
   }
 
   if (status === 'rotation_review') {
-    const total = counts.cropped  // only cropped scans go to rotation review
+    // `skipped` scans (already properly cropped, crop transform was a
+    // no-op) still go through rotation review exactly like `cropped` ones
+    // do — both need to be counted here.
+    const total = counts.cropped + counts.skipped
     const pending = counts.pending_rotation
     if (total <= 0) return 60
-    const confirmed = total - pending
-    const ratio = confirmed / total
-    return Math.round(60 + ratio * 20)
+    const confirmed = Math.max(0, total - pending)
+    const ratio = Math.max(0, Math.min(1, confirmed / total))
+    return Math.min(80, Math.round(60 + ratio * 20))
   }
 
   if (status === 'cropping') {
     const total = counts.scans
     if (total <= 0) return 20
-    const done = counts.cropped + counts.crop_failed
-    const ratio = done / total
-    return Math.round(20 + ratio * 40)
+    const done = counts.cropped + counts.skipped + counts.crop_failed
+    const ratio = Math.max(0, Math.min(1, done / total))
+    return Math.min(60, Math.round(20 + ratio * 40))
   }
 
   // extracting (and any unrecognised status)
