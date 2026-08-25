@@ -37,6 +37,7 @@ def _hash_crop(card_crop_id: int) -> None:
 
         batch_id = raw_scan.batch_id
         with stage("hashing", batch_id=batch_id, image_name=raw_scan.original_filename):
+            crop.dedup_completed_at = None
             image_bytes = storage.download_bytes(crop.r2_key_cropped)
 
             if crop.rotation_degrees % 360:

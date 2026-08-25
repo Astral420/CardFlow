@@ -2,6 +2,7 @@
 cross-batch BK-tree lookup, writes duplicate_candidates rows.
 """
 
+from datetime import datetime, timezone
 from typing import cast
 from celery.app.task import Task
 
@@ -33,6 +34,7 @@ def _find_duplicates(card_crop_id: int) -> None:
             hits = find_within_batch_duplicates(db, crop, batch_id)
 
             record_duplicate_candidates(db, crop, hits)
+            crop.dedup_completed_at = datetime.now(timezone.utc)
             refresh_batch_status(db, batch_id)
             db.commit()
 

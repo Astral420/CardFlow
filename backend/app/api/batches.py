@@ -14,6 +14,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import Response
+from botocore.exceptions import ClientError
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -68,6 +69,8 @@ _MAX_IMAGE_FILE_COUNT = 200
 _MAX_IMAGE_FILE_SIZE = 25 * 1024 * 1024
 _MAX_IMAGE_UPLOAD_SIZE = 500 * 1024 * 1024
 
+ExportEntry = tuple[int, str, int, str, str]
+
 
 
 
@@ -87,6 +90,106 @@ def _natural_sort_key(filename: str, side: str) -> tuple:
         parts.append(int(chunk) if chunk.isdigit() else chunk)
     side_order = 0 if side.lower() == "front" else 1
     return (*parts, side_order)
+
+
+def _collect_export_entries(db: Session, batch_id: int) -> list[ExportEntry]:
+    """Return the exact, naturally sorted crop set represented by an export."""
+    confirmed_dup_crop_ids: set[int] = set(
+        row[0]
+        for row in db.query(DuplicateCandidate.card_crop_id_b)
+        .join(CardCrop, DuplicateCandidate.card_crop_id_a == CardCrop.id)
+        .join(RawScan, CardCrop.raw_scan_id == RawScan.id)
+        .filter(
+            RawScan.batch_id == batch_id,
+            DuplicateCandidate.status == DuplicateStatus.confirmed_duplicate,
+        )
+        .all()
+    )
+    rows = (
+        db.query(
+            CardCrop.id,
+            CardCrop.r2_key_cropped,
+            CardCrop.rotation_degrees,
+            RawScan.original_filename,
+            RawScan.side,
+        )
+        .join(RawScan, CardCrop.raw_scan_id == RawScan.id)
+        .filter(
+            RawScan.batch_id == batch_id,
+            CardCrop.r2_key_cropped.isnot(None),
+        )
+        .all()
+    )
+    return sorted(
+        (
+            (crop_id, r2_key, rotation or 0, original_filename, side.value)
+            for crop_id, r2_key, rotation, original_filename, side in rows
+            if r2_key is not None and crop_id not in confirmed_dup_crop_ids
+        ),
+        key=lambda entry: _natural_sort_key(entry[3], entry[4]),
+    )
+
+
+def _export_manifest_hash(entries: list[ExportEntry]) -> str:
+    manifest_data = "\n".join(
+        f"{crop_id}:{r2_key}:{rotation}:{filename}:{side}"
+        for crop_id, r2_key, rotation, filename, side in entries
+    )
+    return hashlib.sha256(manifest_data.encode("utf-8")).hexdigest()
+
+
+def _lock_and_validate_export(
+    db: Session, batch_id: int, expected_manifest_hash: str
+) -> Batch:
+    """Serialize final publication with re-rotation and reject stale work."""
+    batch = (
+        db.query(Batch)
+        .filter(Batch.id == batch_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if batch is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found")
+
+    refresh_batch_status(db, batch_id)
+    if batch.status != BatchStatus.complete:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Cannot export batch ZIP: pipeline is not complete (current status: {batch.status.value})",
+        )
+
+    current_entries = _collect_export_entries(db, batch_id)
+    if not current_entries:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "No cropped images found for this batch",
+        )
+    if _export_manifest_hash(current_entries) != expected_manifest_hash:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Batch changed while its ZIP was being prepared; retry the download",
+        )
+    return batch
+
+
+def _cached_object_is_missing(exc: Exception) -> bool:
+    if isinstance(exc, FileNotFoundError):
+        return True
+    if not isinstance(exc, ClientError):
+        return False
+    code = str(exc.response.get("Error", {}).get("Code", ""))
+    return code in {"404", "NoSuchKey", "NotFound"}
+
+
+def _discard_cached_export(db: Session, cached_export: BatchExport) -> None:
+    """Remove the authoritative cache pointer, then best-effort prune R2."""
+    r2_key = cached_export.r2_key
+    db.delete(cached_export)
+    db.commit()
+    try:
+        storage.delete_object(r2_key)
+    except Exception as exc:
+        logger.warning("Failed to delete invalid cached export %s: %s", r2_key, exc)
 
 
 @router.get("", response_model=list[BatchDetailOut])
@@ -415,9 +518,18 @@ def get_batch_scans(
     results = []
     for scan in scans:
         thumbnail_url = None
+        raw_image_url = None
+        crop_failure_reason = None
         rotation_degrees = 0
         is_duplicate = False
         is_intentional_duplicate = False
+        if scan.status == ScanStatus.crop_failed:
+            raw_image_url = storage.presigned_url(scan.r2_key_raw)
+            crop_failure_reason = (
+                "bad_aspect_ratio"
+                if scan.crop is not None and scan.crop.aspect_ratio_ok is False
+                else "crop_error"
+            )
         if scan.crop and scan.crop.r2_key_cropped:
             thumbnail_url = storage.presigned_url(scan.crop.r2_key_cropped)
             rotation_degrees = scan.crop.rotation_degrees or 0
@@ -430,6 +542,12 @@ def get_batch_scans(
                 side=scan.side,
                 status=scan.status,
                 thumbnail_url=thumbnail_url,
+                raw_image_url=raw_image_url,
+                crop_failure_reason=crop_failure_reason,
+                crop_id=scan.crop.id if scan.crop else None,
+                rotation_confirmed_at=(
+                    scan.crop.rotation_confirmed_at if scan.crop else None
+                ),
                 rotation_degrees=rotation_degrees,
                 is_duplicate=is_duplicate,
                 is_intentional_duplicate=is_intentional_duplicate,
@@ -512,51 +630,7 @@ def export_batch_zip(
 
     log_event("export requested", batch_id=batch_id)
 
-    # Collect crop IDs to exclude from the export: card_crop_id_b in a
-    # confirmed-duplicate pair. Deliberately scoped to confirmed_duplicate
-    # only -- intentional_duplicate pairs are an acknowledged match that's
-    # still supposed to ship both sides (e.g. genuinely holding 2 copies of
-    # the same card), so they must NOT appear in this exclusion set.
-    confirmed_dup_crop_ids: set[int] = set(
-        row[0]
-        for row in db.query(DuplicateCandidate.card_crop_id_b)
-        .join(CardCrop, DuplicateCandidate.card_crop_id_a == CardCrop.id)
-        .join(RawScan, CardCrop.raw_scan_id == RawScan.id)
-        .filter(
-            RawScan.batch_id == batch_id,
-            DuplicateCandidate.status == DuplicateStatus.confirmed_duplicate,
-        )
-        .all()
-    )
-
-    # Fetch all crops that have a stored image, joining raw_scan eagerly so we
-    # can read all needed fields while the session is still open.
-    rows = (
-        db.query(
-            CardCrop.id,
-            CardCrop.r2_key_cropped,
-            CardCrop.rotation_degrees,
-            RawScan.original_filename,
-            RawScan.side,
-        )
-        .join(RawScan, CardCrop.raw_scan_id == RawScan.id)
-        .filter(
-            RawScan.batch_id == batch_id,
-            CardCrop.r2_key_cropped.isnot(None),
-        )
-        .all()
-    )
-
-    # Exclude confirmed duplicates and sort: card number naturally, front before back.
-    entries: list[tuple[int, str, int, str, str]] = sorted(
-        (
-            (crop_id, r2_key, rotation or 0, original_filename, side.value)
-            for crop_id, r2_key, rotation, original_filename, side in rows
-            if r2_key is not None
-            and crop_id not in confirmed_dup_crop_ids
-        ),
-        key=lambda e: _natural_sort_key(e[3], e[4]),
-    )
+    entries = _collect_export_entries(db, batch_id)
 
     if not entries:
         log_event(
@@ -569,12 +643,8 @@ def export_batch_zip(
             "No cropped images found for this batch",
         )
 
-    # Deterministic manifest hash representing exact export contents
-    manifest_data = "\n".join(
-        f"{crop_id}:{r2_key}:{rotation}:{filename}:{side}"
-        for crop_id, r2_key, rotation, filename, side in entries
-    )
-    manifest_hash = hashlib.sha256(manifest_data.encode("utf-8")).hexdigest()
+    # Deterministic manifest hash representing exact export contents.
+    manifest_hash = _export_manifest_hash(entries)
 
     label = batch.source_label or f"batch_{batch_id}"
     safe_label = "".join(c if c.isalnum() or c in "-_ " else "_" for c in label).strip()
@@ -592,44 +662,73 @@ def export_batch_zip(
     )
 
     if cached_export:
-        logger.info(
-            "[EXPORT CACHE HIT] Batch %d: Fetching pre-generated ZIP from R2 (%s)",
-            batch_id,
-            cached_export.r2_key,
-        )
-        log_event(
-            "export cache hit: serving pre-generated ZIP from R2",
-            batch_id=batch_id,
-            manifest_hash=manifest_hash,
-            source="r2_cache",
-            r2_key=cached_export.r2_key,
-            image_count=cached_export.image_count,
-        )
-        zip_bytes = storage.download_bytes(cached_export.r2_key)
+        cache_key = cached_export.r2_key
+        cache_image_count = cached_export.image_count
+        cache_checksum = cached_export.checksum
+        try:
+            zip_bytes = storage.download_bytes(cache_key)
+        except Exception as exc:
+            if not _cached_object_is_missing(exc):
+                raise
+            logger.warning(
+                "Cached export object %s is missing; rebuilding batch %d",
+                cache_key,
+                batch_id,
+            )
+            _discard_cached_export(db, cached_export)
+            cached_export = None
+        else:
+            actual_checksum = hashlib.sha256(zip_bytes).hexdigest()[:16]
+            if not cache_checksum or actual_checksum != cache_checksum:
+                logger.warning(
+                    "Cached export checksum mismatch for %s; rebuilding batch %d",
+                    cache_key,
+                    batch_id,
+                )
+                _discard_cached_export(db, cached_export)
+                cached_export = None
+            else:
+                # Re-rotation uses the same row lock while changing status and
+                # invalidating exports. Validate only after the slow R2 read so
+                # the lock is held for a short, deterministic interval.
+                _lock_and_validate_export(db, batch_id, manifest_hash)
+                db.commit()
 
-        redis_state.push_recent(
-            "obs:recent_exports",
-            {
-                "batch_id": batch_id,
-                "source": "r2_cache",
-                "output_size": len(zip_bytes),
-                "image_count": cached_export.image_count,
-                "checksum": cached_export.checksum,
-                "manifest_hash": manifest_hash,
-                "at": redis_state.now_iso(),
-            },
-        )
-
-        return Response(
-            content=zip_bytes,
-            media_type="application/zip",
-            headers={
-                "Content-Disposition": disposition,
-                "Content-Length": str(len(zip_bytes)),
-                "X-Export-Cached": "true",
-                "X-Export-Source": "r2_cache",
-            },
-        )
+                logger.info(
+                    "[EXPORT CACHE HIT] Batch %d: Fetching pre-generated ZIP from R2 (%s)",
+                    batch_id,
+                    cache_key,
+                )
+                log_event(
+                    "export cache hit: serving pre-generated ZIP from R2",
+                    batch_id=batch_id,
+                    manifest_hash=manifest_hash,
+                    source="r2_cache",
+                    r2_key=cache_key,
+                    image_count=cache_image_count,
+                )
+                redis_state.push_recent(
+                    "obs:recent_exports",
+                    {
+                        "batch_id": batch_id,
+                        "source": "r2_cache",
+                        "output_size": len(zip_bytes),
+                        "image_count": cache_image_count,
+                        "checksum": cache_checksum,
+                        "manifest_hash": manifest_hash,
+                        "at": redis_state.now_iso(),
+                    },
+                )
+                return Response(
+                    content=zip_bytes,
+                    media_type="application/zip",
+                    headers={
+                        "Content-Disposition": disposition,
+                        "Content-Length": str(len(zip_bytes)),
+                        "X-Export-Cached": "true",
+                        "X-Export-Source": "r2_cache",
+                    },
+                )
 
     logger.info(
         "[EXPORT CACHE MISS] Batch %d: Generating new ZIP from %d cropped images on backend",
@@ -670,6 +769,26 @@ def export_batch_zip(
         checksum = hashlib.sha256(zip_bytes).hexdigest()[:16]
         archive_r2_key = storage.export_key(batch_id, manifest_hash)
 
+        # Revalidate under the same PostgreSQL row lock used by re-rotation.
+        # All source downloads and ZIP compression happened before this point,
+        # so the lock only covers final publication and its R2 upload.
+        _lock_and_validate_export(db, batch_id, manifest_hash)
+
+        # Another request may have populated this manifest while this request
+        # was building. Reuse that archive through the normal verified hit path
+        # instead of racing two writes to the same content-addressed key.
+        concurrent_export = (
+            db.query(BatchExport)
+            .filter(
+                BatchExport.batch_id == batch_id,
+                BatchExport.manifest_hash == manifest_hash,
+            )
+            .first()
+        )
+        if concurrent_export is not None:
+            db.commit()
+            return export_batch_zip(batch_id=batch_id, db=db, _user=_user)
+
         # Upload ZIP archive to R2
         storage.upload_bytes(archive_r2_key, zip_bytes, content_type="application/zip")
         logger.info(
@@ -681,14 +800,10 @@ def export_batch_zip(
 
         # Prune older/stale exports for this batch to prevent storage leaks
         old_exports = db.query(BatchExport).filter(BatchExport.batch_id == batch_id).all()
+        stale_export_keys: list[str] = []
         for old_exp in old_exports:
             if old_exp.r2_key != archive_r2_key:
-                try:
-                    storage.delete_object(old_exp.r2_key)
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to delete stale export object %s: %s", old_exp.r2_key, exc
-                    )
+                stale_export_keys.append(old_exp.r2_key)
             db.delete(old_exp)
         db.flush()
 
@@ -717,6 +832,19 @@ def export_batch_zip(
             )
             if new_export is None:
                 raise
+
+        # Database state is authoritative. Prune stale R2 objects only after
+        # the new cache record commits so a failed transaction cannot destroy
+        # the last valid archive.
+        for stale_export_key in stale_export_keys:
+            try:
+                storage.delete_object(stale_export_key)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to delete stale export object %s: %s",
+                    stale_export_key,
+                    exc,
+                )
 
         log_event(
             "export completed",

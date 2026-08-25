@@ -3,12 +3,12 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, ImageOff, Maximize2, ExternalLink, Download, AlertTriangle,
-  Loader2, Images, Copy, CheckCircle2, ArrowRight, Trash2,
+  Loader2, Images, Copy, CheckCircle2, ArrowRight, Trash2, RotateCw, ListChecks, X,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   getBatch, getBatchScans, getBatchDuplicates, forceAdvanceBatch,
-  exportBatchZip, apiErrorMessage,
+  exportBatchZip, apiErrorMessage, requestRerotation, bulkRerotation,
 } from '@/lib/api'
 import { BatchStatusBadge, ScanStatusBadge } from '@/components/shared/status-badge'
 import { EmptyState } from '@/components/shared/empty-state'
@@ -23,26 +23,46 @@ import { cn } from '@/lib/utils'
 import { RotatedImage, FullscreenLightbox } from '@/components/shared/image-lightbox'
 import { DeleteBatchDialog } from '@/components/shared/delete-batch-dialog'
 import { useAuth } from '@/lib/auth'
+import { useToast } from '@/components/ui/toast'
 import type { BatchDuplicatePair, RawScan } from '@/lib/types'
 
 // --- All-Scans tab ---
 
-function ScanThumbnail({ scan, onClick }: { scan: RawScan; onClick: () => void }) {
+function ScanThumbnail({
+  scan,
+  onClick,
+  selectMode = false,
+  isSelected = false,
+  selectable = true,
+  onToggleSelect,
+}: {
+  scan: RawScan
+  onClick: () => void
+  selectMode?: boolean
+  isSelected?: boolean
+  selectable?: boolean
+  onToggleSelect?: () => void
+}) {
   // Dimming visually implies "excluded from export" -- only true for
   // confirmed_duplicate. An intentional_duplicate ships both sides, so it
   // must not look de-emphasized the same way.
   const isExcludedDuplicate = scan.is_duplicate && !scan.is_intentional_duplicate
+  const handleClick = () => {
+    if (selectMode && selectable) onToggleSelect?.()
+    else if (!selectMode) onClick()
+  }
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.97 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.16 }}
-      className={`group relative cursor-pointer overflow-hidden rounded-xl border bg-muted transition-all duration-150 hover:-translate-y-px hover:shadow-soft ${isExcludedDuplicate ? 'border-accent-rose-solid/40 opacity-50' : scan.is_intentional_duplicate ? 'border-accent-lavender-solid/40' : 'border-border'
+      className={`group relative cursor-pointer overflow-hidden rounded-xl border bg-muted transition-all duration-150 hover:-translate-y-px hover:shadow-soft ${isSelected ? 'border-interactive ring-2 ring-interactive' : isExcludedDuplicate ? 'border-accent-rose-solid/40 opacity-50' : scan.is_intentional_duplicate ? 'border-accent-lavender-solid/40' : 'border-border'
         }`}
-      onClick={onClick}
+      onClick={handleClick}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => e.key === 'Enter' && onClick()}
+      onKeyDown={(e) => e.key === 'Enter' && handleClick()}
+      aria-disabled={selectMode && !selectable}
     >
       {scan.thumbnail_url ? (
         <RotatedImage
@@ -58,14 +78,35 @@ function ScanThumbnail({ scan, onClick }: { scan: RawScan; onClick: () => void }
       )}
 
       {/* Hover overlay */}
-      <div className="absolute inset-0 flex items-center justify-center bg-primary/60 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-        <Maximize2 className="h-6 w-6 text-white" />
-      </div>
+      {!selectMode && (
+        <div className="absolute inset-0 flex items-center justify-center bg-primary/60 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+          <Maximize2 className="h-6 w-6 text-white" />
+        </div>
+      )}
 
-      {/* Filename tooltip bar */}
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-primary/80 to-transparent p-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-        <p className="truncate text-caption font-medium text-white">{scan.original_filename}</p>
-      </div>
+      {/* Selection checkbox overlay */}
+      {selectMode && (
+        <div className="absolute left-3 bottom-3 pointer-events-none select-none">
+          <span
+            className={cn(
+              'flex h-5 w-5 items-center justify-center rounded-md border backdrop-blur-md shadow-md transition-colors',
+              isSelected
+                ? 'border-transparent bg-interactive text-white'
+                : 'border-slate-500/70 bg-slate-950/80',
+              !selectable && 'opacity-40'
+            )}
+          >
+            {isSelected && <CheckCircle2 className="h-3.5 w-3.5" />}
+          </span>
+        </div>
+      )}
+
+      {/* Filename tooltip bar — hidden in select mode to avoid covering the checkbox */}
+      {!selectMode && (
+        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-primary/80 to-transparent p-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+          <p className="truncate text-caption font-medium text-white">{scan.original_filename}</p>
+        </div>
+      )}
 
       {/* Side chip — top-right */}
       <div className="absolute right-3 top-3 pointer-events-none select-none">
@@ -89,9 +130,85 @@ function ScanThumbnail({ scan, onClick }: { scan: RawScan; onClick: () => void }
   )
 }
 
+// --- Failed Crops tab ---
+
+function FailedScanThumbnail({ scan, onClick }: { scan: RawScan; onClick: () => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.97 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.16 }}
+      className="group relative cursor-pointer overflow-hidden rounded-xl border border-accent-peach-solid/40 bg-muted transition-all duration-150 hover:-translate-y-px hover:shadow-soft"
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => e.key === 'Enter' && onClick()}
+    >
+      {scan.raw_image_url ? (
+        <img
+          src={scan.raw_image_url}
+          alt={scan.original_filename}
+          loading="lazy"
+          className="aspect-[2.5/3.5] w-full object-cover"
+        />
+      ) : (
+        <div className="flex aspect-[2.5/3.5] w-full items-center justify-center bg-muted">
+          <ImageOff className="h-8 w-8 text-muted-foreground/40" />
+        </div>
+      )}
+
+      {/* Hover overlay */}
+      <div className="absolute inset-0 flex items-center justify-center bg-primary/60 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+        <Maximize2 className="h-6 w-6 text-white" />
+      </div>
+
+      {/* Filename tooltip bar */}
+      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-primary/80 to-transparent p-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+        <p className="truncate text-caption font-medium text-white">{scan.original_filename}</p>
+      </div>
+
+      {/* Failure reason + side chips — stacked top-right */}
+      <div className="absolute right-3 top-3 flex flex-col items-end gap-1 pointer-events-none select-none">
+        <span
+          className={`inline-flex items-center gap-1 rounded-md bg-slate-950/80 px-2 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-wider leading-none backdrop-blur-md border border-slate-700/60 shadow-md ${scan.crop_failure_reason === 'bad_aspect_ratio' ? 'text-accent-peach-solid' : 'text-accent-rose-solid'
+            }`}
+        >
+          <AlertTriangle className="h-3 w-3 shrink-0" />
+          {scan.crop_failure_reason === 'bad_aspect_ratio' ? 'Bad Ratio' : 'Crop Error'}
+        </span>
+        <span className="inline-flex items-center rounded-md bg-slate-950/80 px-2 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-wider leading-none text-slate-200 backdrop-blur-md border border-slate-700/60 shadow-md">
+          {scan.side}
+        </span>
+      </div>
+    </motion.div>
+  )
+}
+
 
 function InspectorDrawer({ scan, onClose }: { scan: RawScan; onClose: () => void }) {
   const [isLightboxOpen, setIsLightboxOpen] = useState(false)
+  const { canEdit } = useAuth()
+  const { toast } = useToast()
+  const queryClient = useQueryClient()
+  const { id } = useParams<{ id: string }>()
+  const batchId = Number(id)
+
+  // Crop-failed scans have no cropped image — show the raw pre-crop scan.
+  const isFailedScan = scan.status === 'crop_failed'
+  const imageUrl = isFailedScan ? scan.raw_image_url : scan.thumbnail_url
+
+  const rerotateMutation = useMutation({
+    mutationFn: () => requestRerotation(scan.crop_id!),
+    onSuccess: () => {
+      toast({ title: 'Sent to rotation queue', variant: 'success' })
+      queryClient.invalidateQueries({ queryKey: ['batch', batchId] })
+      queryClient.invalidateQueries({ queryKey: ['batch-scans', batchId] })
+      onClose()
+    },
+    onError: (err) => {
+      toast({ title: 'Re-rotation failed', description: apiErrorMessage(err), variant: 'error' })
+    },
+  })
 
   return (
     <Dialog open onOpenChange={(open) => {
@@ -105,7 +222,7 @@ function InspectorDrawer({ scan, onClose }: { scan: RawScan; onClose: () => void
         <div className="flex gap-5">
           {/* ── Left: image panel ── */}
           <div className="flex shrink-0 flex-col gap-2">
-            {scan.thumbnail_url ? (
+            {imageUrl ? (
               <button
                 type="button"
                 onClick={() => setIsLightboxOpen(true)}
@@ -113,9 +230,9 @@ function InspectorDrawer({ scan, onClose }: { scan: RawScan; onClose: () => void
                 aria-label="Open full image"
               >
                 <RotatedImage
-                  src={scan.thumbnail_url}
+                  src={imageUrl}
                   alt={scan.original_filename}
-                  rotationDegrees={scan.rotation_degrees}
+                  rotationDegrees={isFailedScan ? 0 : scan.rotation_degrees}
                   className="h-full w-full"
                 />
                 {/* Zoom overlay */}
@@ -131,9 +248,9 @@ function InspectorDrawer({ scan, onClose }: { scan: RawScan; onClose: () => void
                 <ImageOff className="h-10 w-10 text-muted-foreground/40" />
               </div>
             )}
-            {scan.thumbnail_url && (
+            {imageUrl && (
               <a
-                href={scan.thumbnail_url}
+                href={imageUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-center gap-1.5 rounded-lg border border-border bg-muted/60 px-2.5 py-1.5 text-caption font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-primary"
@@ -157,6 +274,16 @@ function InspectorDrawer({ scan, onClose }: { scan: RawScan; onClose: () => void
               <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Side</span>
               <span className="text-body font-medium text-primary capitalize">{scan.side}</span>
             </div>
+
+            {/* Failure reason — crop_failed only */}
+            {isFailedScan && scan.crop_failure_reason && (
+              <div className="flex items-center justify-between px-3.5 py-2.5">
+                <span className="text-caption font-semibold uppercase tracking-wider text-muted-foreground">Failure Reason</span>
+                <Badge variant={scan.crop_failure_reason === 'bad_aspect_ratio' ? 'peach' : 'rose'}>
+                  {scan.crop_failure_reason === 'bad_aspect_ratio' ? 'Bad Aspect Ratio' : 'Crop Error'}
+                </Badge>
+              </div>
+            )}
 
             {/* Duplicate flag — only if flagged */}
             {scan.is_duplicate && (
@@ -189,15 +316,35 @@ function InspectorDrawer({ scan, onClose }: { scan: RawScan; onClose: () => void
             </div>
           </div>
         </div>
+
+        {/* Re-rotation — only for already-confirmed crops with a valid crop row */}
+        {canEdit && !isFailedScan && scan.crop_id != null && scan.rotation_confirmed_at && (
+          <div className="mt-4 flex justify-end">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => rerotateMutation.mutate()}
+              disabled={rerotateMutation.isPending}
+              className="gap-2"
+            >
+              {rerotateMutation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RotateCw className="h-3.5 w-3.5" />
+              )}
+              Request Re-rotation
+            </Button>
+          </div>
+        )}
       </DialogContent>
 
-      {scan.thumbnail_url && (
+      {imageUrl && (
         <FullscreenLightbox
           isOpen={isLightboxOpen}
           onClose={() => setIsLightboxOpen(false)}
-          src={scan.thumbnail_url}
+          src={imageUrl}
           alt={scan.original_filename}
-          rotationDegrees={scan.rotation_degrees}
+          rotationDegrees={isFailedScan ? 0 : scan.rotation_degrees}
         />
       )}
     </Dialog>
@@ -381,16 +528,19 @@ function compareNatural(a: RawScan, b: RawScan): number {
 
 // --- Main page ---
 
-type TabId = 'scans' | 'duplicates'
+type TabId = 'scans' | 'failed' | 'duplicates'
 
 export function BatchDetailPage() {
   const { id } = useParams<{ id: string }>()
   const batchId = Number(id)
   const { canEdit, isAdmin } = useAuth()
+  const { toast } = useToast()
   const [selectedScan, setSelectedScan] = useState<RawScan | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
   const [isExporting, setIsExporting] = useState(false)
   const [activeTab, setActiveTab] = useState<TabId>('scans')
+  const [isSelectMode, setIsSelectMode] = useState(false)
+  const [selectedCropIds, setSelectedCropIds] = useState<Set<number>>(new Set())
   const queryClient = useQueryClient()
 
   const { data: batch, isLoading: batchLoading } = useQuery({
@@ -426,6 +576,33 @@ export function BatchDetailPage() {
     },
   })
 
+  const bulkRerotationMutation = useMutation({
+    mutationFn: () => bulkRerotation([...selectedCropIds]),
+    onSuccess: (result) => {
+      toast({
+        title: `${result.requeued_count} card${result.requeued_count === 1 ? '' : 's'} sent to rotation queue`,
+        variant: 'success',
+      })
+      setSelectedCropIds(new Set())
+      setIsSelectMode(false)
+      queryClient.invalidateQueries({ queryKey: ['batch', batchId] })
+      queryClient.invalidateQueries({ queryKey: ['batch-scans', batchId] })
+    },
+    onError: (err) => {
+      toast({ title: 'Bulk re-rotation failed', description: apiErrorMessage(err), variant: 'error' })
+    },
+  })
+
+  const toggleCropSelection = (cropId: number | null) => {
+    if (cropId == null) return
+    setSelectedCropIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(cropId)) next.delete(cropId)
+      else next.add(cropId)
+      return next
+    })
+  }
+
   const handleExport = async () => {
     setExportError(null)
     setIsExporting(true)
@@ -456,8 +633,19 @@ export function BatchDetailPage() {
   // Sort scans: card number naturally (1, 2, 10 not 1, 10, 2), then front before back
   const sortedScans = scans ? [...scans].sort(compareNatural) : undefined
 
+  const failedScans = sortedScans?.filter((s) => s.status === 'crop_failed')
+  const failedCount = failedScans?.length ?? 0
+  const hasConfirmedCrops = (scans ?? []).some(
+    (s) => s.crop_id != null && s.rotation_confirmed_at != null
+  )
+  const exitSelectMode = () => {
+    setIsSelectMode(false)
+    setSelectedCropIds(new Set())
+  }
+
   const TABS: { id: TabId; label: string; count?: number }[] = [
     { id: 'scans', label: 'All Scans', count: scans?.length },
+    { id: 'failed', label: 'Failed Crops', count: failedCount },
     { id: 'duplicates', label: 'Duplicates', count: duplicateCount },
   ]
 
@@ -620,6 +808,8 @@ export function BatchDetailPage() {
             >
               {tab.id === 'scans' ? (
                 <Images className="h-3.5 w-3.5" />
+              ) : tab.id === 'failed' ? (
+                <AlertTriangle className="h-3.5 w-3.5" />
               ) : (
                 <Copy className="h-3.5 w-3.5" />
               )}
@@ -628,7 +818,9 @@ export function BatchDetailPage() {
                 <span
                   className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${tab.id === 'duplicates'
                     ? 'bg-accent-rose text-accent-rose-foreground'
-                    : 'bg-muted text-muted-foreground'
+                    : tab.id === 'failed'
+                      ? 'bg-accent-peach text-accent-peach-foreground'
+                      : 'bg-muted text-muted-foreground'
                     }`}
                 >
                   {tab.count}
@@ -650,7 +842,7 @@ export function BatchDetailPage() {
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.15 }}
             >
-              <div className="mb-3">
+              <div className="mb-3 flex items-end justify-between gap-3">
                 <SectionLabel>
                   Scans {scans ? `(${scans.length})` : ''}
                   {duplicateCount > 0 && (
@@ -659,6 +851,24 @@ export function BatchDetailPage() {
                     </span>
                   )}
                 </SectionLabel>
+                {canEdit && hasConfirmedCrops && !scansLoading && sortedScans?.length ? (
+                  isSelectMode ? (
+                    <Button variant="ghost" size="sm" onClick={exitSelectMode} className="gap-2 shrink-0">
+                      <X className="h-3.5 w-3.5" />
+                      Cancel
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setIsSelectMode(true)}
+                      className="gap-2 shrink-0"
+                    >
+                      <ListChecks className="h-3.5 w-3.5" />
+                      Select
+                    </Button>
+                  )
+                ) : null}
               </div>
               {scansLoading ? (
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8">
@@ -676,6 +886,53 @@ export function BatchDetailPage() {
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8">
                   {sortedScans.map((scan) => (
                     <ScanThumbnail
+                      key={scan.id}
+                      scan={scan}
+                      onClick={() => setSelectedScan(scan)}
+                      selectMode={isSelectMode}
+                      isSelected={scan.crop_id != null && selectedCropIds.has(scan.crop_id)}
+                      selectable={canEdit && scan.crop_id != null}
+                      onToggleSelect={() => toggleCropSelection(scan.crop_id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+
+          {activeTab === 'failed' && (
+            <motion.div
+              key="failed"
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.15 }}
+            >
+              <div className="mb-4">
+                <SectionLabel>
+                  Failed Crops {failedScans ? `(${failedScans.length})` : ''}
+                </SectionLabel>
+                <p className="mt-0.5 text-caption text-muted-foreground">
+                  These scans failed automatic cropping. The raw (pre-crop) image is shown.
+                  Click a scan to inspect it.
+                </p>
+              </div>
+              {scansLoading ? (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <Skeleton key={i} className="aspect-[2.5/3.5] rounded-xl" />
+                  ))}
+                </div>
+              ) : !failedScans?.length ? (
+                <EmptyState
+                  icon={<CheckCircle2 className="h-6 w-6" />}
+                  title="No failed crops"
+                  description="Crops that fail during processing will appear here."
+                />
+              ) : (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8">
+                  {failedScans.map((scan) => (
+                    <FailedScanThumbnail
                       key={scan.id}
                       scan={scan}
                       onClick={() => setSelectedScan(scan)}
@@ -726,6 +983,36 @@ export function BatchDetailPage() {
           )}
         </AnimatePresence>
       </div>
+
+      {/* Bulk re-rotation floating action bar */}
+      <AnimatePresence>
+        {isSelectMode && selectedCropIds.size > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+            transition={{ duration: 0.15 }}
+            className="fixed bottom-5 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-border bg-surface px-4 py-2.5 shadow-float"
+          >
+            <span className="text-caption font-medium text-muted-foreground whitespace-nowrap">
+              {selectedCropIds.size} selected
+            </span>
+            <Button
+              size="sm"
+              onClick={() => bulkRerotationMutation.mutate()}
+              disabled={bulkRerotationMutation.isPending}
+              className="gap-2"
+            >
+              {bulkRerotationMutation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RotateCw className="h-3.5 w-3.5" />
+              )}
+              Send to Re-rotation
+            </Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {selectedScan && (
         <InspectorDrawer

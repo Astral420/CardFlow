@@ -63,6 +63,9 @@ def _finished_batch_with_crop(db):
         rotation_confirmed_at=__import__("datetime").datetime.now(
             __import__("datetime").timezone.utc
         ),
+        dedup_completed_at=__import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        ),
         hash_0="0" * 16,
         color_sig_0=[0.0],
     )
@@ -171,6 +174,43 @@ def test_non_terminal_batch_still_advances_normally():
         db.close()
 
 
+def test_confirmed_front_waits_for_duplicate_detection_before_completion():
+    db = _make_session()
+    try:
+        batch = Batch(status=BatchStatus.rotation_review)
+        db.add(batch)
+        db.flush()
+        raw_scan = RawScan(
+            batch_id=batch.id,
+            r2_key_raw="raw/1/card-1-front.jpg",
+            original_filename="card-1-front.jpg",
+            side=ScanSide.front,
+            status=ScanStatus.cropped,
+        )
+        db.add(raw_scan)
+        db.flush()
+        crop = CardCrop(
+            raw_scan_id=raw_scan.id,
+            r2_key_cropped="cropped/1/1-front.jpg",
+            rotation_confirmed_at=__import__("datetime").datetime.now(
+                __import__("datetime").timezone.utc
+            ),
+            hash_0="0" * 16,
+            color_sig_0=[0.0],
+        )
+        db.add(crop)
+        db.commit()
+
+        assert refresh_batch_status(db, batch.id) == BatchStatus.rotation_review
+
+        crop.dedup_completed_at = __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        )
+        assert refresh_batch_status(db, batch.id) == BatchStatus.complete
+    finally:
+        db.close()
+
+
 def test_skipped_scan_gates_status_same_as_cropped():
     """`skipped` (crop transform was a no-op -- image was already properly
     cropped, see app.vision.crop.CropResult.already_cropped) must be
@@ -211,6 +251,9 @@ def test_skipped_scan_gates_status_same_as_cropped():
         # review exactly like `cropped` does, straight to complete (no
         # pending duplicates).
         crop.rotation_confirmed_at = __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        )
+        crop.dedup_completed_at = __import__("datetime").datetime.now(
             __import__("datetime").timezone.utc
         )
         crop.hash_0 = "0" * 16

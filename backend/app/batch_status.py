@@ -8,6 +8,7 @@ from app.models import (
     DuplicateCandidate,
     DuplicateStatus,
     RawScan,
+    ScanSide,
     ScanStatus,
 )
 from app.observability import redis_state
@@ -73,6 +74,26 @@ def refresh_batch_status(db: Session, batch_id: int) -> BatchStatus | None:
         or 0
     )
     if pending_rotation:
+        batch.status = BatchStatus.rotation_review
+        redis_state.set_batch_stage(batch_id, batch.status.value)
+        return batch.status
+
+    pending_duplicate_detection = (
+        db.query(func.count(CardCrop.id))
+        .join(RawScan)
+        .filter(
+            RawScan.batch_id == batch_id,
+            RawScan.side == ScanSide.front,
+            RawScan.status.in_((ScanStatus.cropped, ScanStatus.skipped)),
+            CardCrop.rotation_confirmed_at.isnot(None),
+            CardCrop.dedup_completed_at.is_(None),
+        )
+        .scalar()
+        or 0
+    )
+    if pending_duplicate_detection:
+        # No new public status is needed: keep the batch in its existing
+        # processing/review state until the dedup worker records completion.
         batch.status = BatchStatus.rotation_review
         redis_state.set_batch_stage(batch_id, batch.status.value)
         return batch.status

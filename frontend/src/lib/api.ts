@@ -2,6 +2,7 @@ import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
 import type {
   BatchDetail,
   BatchDuplicatePair,
+  BatchStatus,
   CardCrop,
   CardCropDetail,
   CreateUserPayload,
@@ -285,6 +286,27 @@ export async function rotateCrop(cropId: number, degrees: number) {
 export async function confirmCrop(cropId: number) {
   const { data } = await client.post<RotationNext | null>(
     `/review/rotation/${cropId}/confirm`
+  );
+  return data;
+}
+
+export interface RerotationResult {
+  requeued_count: number;
+  batch_id: number;
+  batch_status: BatchStatus;
+}
+
+export async function requestRerotation(cropId: number) {
+  const { data } = await client.post<RerotationResult>(
+    `/review/rotation/${cropId}/request-rerotation`
+  );
+  return data;
+}
+
+export async function bulkRerotation(cropIds: number[]) {
+  const { data } = await client.post<RerotationResult>(
+    "/review/rotation/bulk-rerotation",
+    { crop_ids: cropIds }
   );
   return data;
 }

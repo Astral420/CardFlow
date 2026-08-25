@@ -60,6 +60,10 @@ export interface RawScan {
   side: ScanSide;
   status: ScanStatus;
   thumbnail_url: string | null;
+  raw_image_url: string | null;
+  crop_failure_reason: "crop_error" | "bad_aspect_ratio" | null;
+  crop_id: number | null;
+  rotation_confirmed_at: string | null;
   rotation_degrees: number;
   is_duplicate: boolean;
   is_intentional_duplicate: boolean;

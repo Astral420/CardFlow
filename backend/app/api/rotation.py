@@ -1,19 +1,131 @@
 from datetime import datetime, timezone
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from app import storage
 from app.api.common import crop_item, find_sibling_crop
 from app.api.deps import get_current_user_optional, require_reviewer
 from app.batch_status import refresh_batch_status
 from app.db import get_db
-from app.models import CardCrop, RawScan, ScanSide, ScanStatus
+from app.models import (
+    Batch,
+    BatchExport,
+    BatchStatus,
+    CardCrop,
+    DuplicateCandidate,
+    RawScan,
+    ScanSide,
+    ScanStatus,
+)
 from app.naming import pairing_key
-from app.schemas import CropQueueItemOut, QueueCountOut, RotateRequest, RotationNextOut
+from app.schemas import (
+    BulkRerotationRequest,
+    CropQueueItemOut,
+    QueueCountOut,
+    RerotationResultOut,
+    RotateRequest,
+    RotationNextOut,
+)
 from app.tasks.dispatch import enqueue_task
 from app.tasks.hashing import hash_crop
 
 router = APIRouter(prefix="/api/review/rotation", tags=["rotation-review"])
+logger = logging.getLogger("cardflow.rotation")
+
+_HASH_FIELDS = (
+    "hash_0",
+    "hash_90",
+    "hash_180",
+    "hash_270",
+    "color_sig_0",
+    "color_sig_90",
+    "color_sig_180",
+    "color_sig_270",
+)
+
+
+def _rerotate_pairs(
+    db: Session, selected_crops: list[CardCrop]
+) -> RerotationResultOut:
+    """Reset unique front/back pairs and remove their stale dedup results."""
+    batch_ids = {crop.raw_scan.batch_id for crop in selected_crops}
+    if len(batch_ids) != 1:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "All crops in a bulk re-rotation request must belong to one batch",
+        )
+
+    batch_id = next(iter(batch_ids))
+    batch = (
+        db.query(Batch)
+        .filter(Batch.id == batch_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if batch is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found")
+
+    seen_pairs: set[tuple[int, str]] = set()
+    front_crop_ids: set[int] = set()
+    requeued_count = 0
+
+    for crop in selected_crops:
+        pair_key = (crop.raw_scan.batch_id, crop.raw_scan.pairing_key)
+        if pair_key in seen_pairs:
+            continue
+        seen_pairs.add(pair_key)
+        requeued_count += 1
+
+        sibling = find_sibling_crop(db, crop)
+        pair = (crop, sibling) if sibling is not None else (crop,)
+        for pair_crop in pair:
+            pair_crop.rotation_confirmed_at = None
+            pair_crop.dedup_completed_at = None
+            for field_name in _HASH_FIELDS:
+                setattr(pair_crop, field_name, None)
+            if pair_crop.raw_scan.side == ScanSide.front:
+                front_crop_ids.add(pair_crop.id)
+
+    if front_crop_ids:
+        db.query(DuplicateCandidate).filter(
+            (DuplicateCandidate.card_crop_id_a.in_(front_crop_ids))
+            | (DuplicateCandidate.card_crop_id_b.in_(front_crop_ids))
+        ).delete(synchronize_session=False)
+
+    stale_exports = (
+        db.query(BatchExport).filter(BatchExport.batch_id == batch_id).all()
+    )
+    stale_export_keys = [export.r2_key for export in stale_exports]
+    for stale_export in stale_exports:
+        db.delete(stale_export)
+
+    # A completed batch is terminal to the normal status derivation. Unlock it
+    # explicitly, then let the status machine confirm that pending rotations
+    # put it back in rotation review.
+    batch.status = BatchStatus.rotation_review
+    batch_status = refresh_batch_status(db, batch_id)
+    db.commit()
+
+    # R2 cleanup intentionally happens after the database commit. If object
+    # deletion fails, no cache row can reference the stale archive; only an
+    # unreferenced object remains for later lifecycle cleanup.
+    for export_key in stale_export_keys:
+        try:
+            storage.delete_object(export_key)
+        except Exception as exc:
+            logger.warning(
+                "Failed to delete invalidated export object %s: %s",
+                export_key,
+                exc,
+            )
+
+    return RerotationResultOut(
+        requeued_count=requeued_count,
+        batch_id=batch_id,
+        batch_status=batch_status or batch.status,
+    )
 
 
 def _next_pending(
@@ -78,6 +190,35 @@ def queue_count(
         .count()
     )
     return QueueCountOut(count=count)
+
+
+@router.post("/bulk-rerotation", response_model=RerotationResultOut)
+def bulk_rerotation(
+    payload: BulkRerotationRequest,
+    db: Session = Depends(get_db),
+    _user=Depends(require_reviewer),
+) -> RerotationResultOut:
+    crops: list[CardCrop] = []
+    for crop_id in dict.fromkeys(payload.crop_ids):
+        crop = db.get(CardCrop, crop_id)
+        if crop is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, f"Crop {crop_id} not found"
+            )
+        crops.append(crop)
+    return _rerotate_pairs(db, crops)
+
+
+@router.post("/{crop_id}/request-rerotation", response_model=RerotationResultOut)
+def request_rerotation(
+    crop_id: int,
+    db: Session = Depends(get_db),
+    _user=Depends(require_reviewer),
+) -> RerotationResultOut:
+    crop = db.get(CardCrop, crop_id)
+    if crop is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Crop not found")
+    return _rerotate_pairs(db, [crop])
 
 
 @router.post("/{crop_id}/rotate", response_model=CropQueueItemOut)
