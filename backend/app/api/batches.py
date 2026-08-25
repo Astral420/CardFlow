@@ -31,6 +31,7 @@ from app.models import (
     DuplicateCandidate,
     DuplicateStatus,
     RawScan,
+    ScanSide,
     ScanStatus,
 )
 from app.schemas import (
@@ -45,14 +46,27 @@ from app.schemas import (
 import re as _re
 
 from app.api.common import finite_float_or_none
+from app.naming import parse_side
 from app.observability import redis_state
 from app.observability.events import log_event, stage
+from app.tasks.crop import crop_scan
+from app.tasks.dispatch import enqueue_task
 from app.tasks.extract import extract_batch
 from app.vision.hashing import decode_image, encode_jpeg, rotate_image
 
 logger = logging.getLogger("cardflow.batches")
 
 router = APIRouter(prefix="/api/batches", tags=["batches"])
+
+_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png"}
+_IMAGE_CONTENT_TYPES = {
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+}
+_MAX_IMAGE_FILE_COUNT = 200
+_MAX_IMAGE_FILE_SIZE = 25 * 1024 * 1024
+_MAX_IMAGE_UPLOAD_SIZE = 500 * 1024 * 1024
 
 
 
@@ -128,6 +142,145 @@ async def upload_batch(
     )
 
     extract_batch.delay(batch.id, zip_filename=file.filename)
+
+    return BatchCreateResponse(batch_id=batch.id)
+
+
+@router.post(
+    "/images", response_model=BatchCreateResponse, status_code=status.HTTP_201_CREATED
+)
+async def upload_images(
+    files: list[UploadFile] = File(...),
+    source_label: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+    _user=Depends(require_reviewer),
+) -> BatchCreateResponse:
+    file_count = len(files)
+    if file_count == 0:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "At least one image is required"
+        )
+    if file_count > _MAX_IMAGE_FILE_COUNT:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"A maximum of {_MAX_IMAGE_FILE_COUNT} images can be uploaded at once",
+        )
+
+    validated_files: list[tuple[UploadFile, str, str, ScanSide]] = []
+    declared_total_size = 0
+    for file in files:
+        filename = file.filename or ""
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if ext not in _IMAGE_EXTENSIONS:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Unsupported image extension for '{filename}'; "
+                "expected .jpg, .jpeg, or .png",
+            )
+
+        side = parse_side(filename)
+        if side is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Filename '{filename}' must match "
+                "{id}-front.ext or {id}-back.ext",
+            )
+
+        if file.size is not None:
+            if file.size > _MAX_IMAGE_FILE_SIZE:
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    f"Image '{filename}' exceeds the 25 MB file limit",
+                )
+            declared_total_size += file.size
+            if declared_total_size > _MAX_IMAGE_UPLOAD_SIZE:
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    "Images exceed the 500 MB total upload limit",
+                )
+
+        validated_files.append((file, filename, ext, side))
+
+    batch = Batch(source_label=source_label, status=BatchStatus.cropping)
+    db.add(batch)
+    uploaded_keys: list[str] = []
+    created_scan_ids: list[int] = []
+    total_size = 0
+
+    try:
+        db.flush()  # assign batch.id without committing a partial batch
+
+        for file, filename, ext, side in validated_files:
+            image_bytes = await file.read(_MAX_IMAGE_FILE_SIZE + 1)
+            image_size = len(image_bytes)
+            if image_size > _MAX_IMAGE_FILE_SIZE:
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    f"Image '{filename}' exceeds the 25 MB file limit",
+                )
+
+            total_size += image_size
+            if total_size > _MAX_IMAGE_UPLOAD_SIZE:
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    "Images exceed the 500 MB total upload limit",
+                )
+
+            raw_scan = RawScan(
+                batch_id=batch.id,
+                r2_key_raw="",
+                original_filename=filename,
+                side=side,
+                status=ScanStatus.pending,
+            )
+            db.add(raw_scan)
+            db.flush()  # assign raw_scan.id
+
+            key = storage.raw_key(batch.id, raw_scan.id, side.value, ext)
+            uploaded_keys.append(key)
+            storage.upload_bytes(
+                key,
+                image_bytes,
+                content_type=_IMAGE_CONTENT_TYPES[ext],
+            )
+            raw_scan.r2_key_raw = key
+            created_scan_ids.append(raw_scan.id)
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        for key in uploaded_keys:
+            try:
+                storage.delete_object(key)
+            except Exception:
+                logger.warning(
+                    "could not clean up image after direct upload failure",
+                    exc_info=True,
+                    extra={"r2_key": key},
+                )
+        raise
+
+    log_event(
+        "images uploaded",
+        batch_id=batch.id,
+        file_count=file_count,
+        total_size=total_size,
+        upload_type="images",
+    )
+    redis_state.push_recent(
+        "obs:recent_uploads",
+        {
+            "batch_id": batch.id,
+            "file_count": file_count,
+            "total_size": total_size,
+            "upload_type": "images",
+            "at": redis_state.now_iso(),
+        },
+    )
+    redis_state.set_batch_stage(batch.id, "cropping", image_total=file_count)
+
+    for scan_id in created_scan_ids:
+        enqueue_task(crop_scan, scan_id)
 
     return BatchCreateResponse(batch_id=batch.id)
 

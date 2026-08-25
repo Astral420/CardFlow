@@ -13,19 +13,108 @@ Usage:
     python scripts/dev.py
 """
 
-import os
+import hashlib
 import platform
 import shutil
-import signal
 import subprocess
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 BACKEND_DIR = ROOT_DIR / "backend"
 FRONTEND_DIR = ROOT_DIR / "frontend"
+
+
+@dataclass
+class ServiceProcess:
+    """A child service that can be restarted without disturbing its peers."""
+
+    name: str
+    command: list[str]
+    cwd: Path
+    process: subprocess.Popen | None = None
+
+    def start(self) -> None:
+        self.process = subprocess.Popen(self.command, cwd=self.cwd)
+
+    def restart(self, grace_period: float = 1.0) -> None:
+        process = self.process
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=grace_period)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        self.start()
+
+
+@dataclass
+class PythonSourceWatcher:
+    """Small dependency-free watcher used instead of Uvicorn reload on Windows."""
+
+    root: Path
+    snapshot: dict[Path, bytes] = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.snapshot = self._take_snapshot()
+
+    def _take_snapshot(self) -> dict[Path, bytes]:
+        snapshot = {}
+        for path in self.root.rglob("*.py"):
+            try:
+                snapshot[path] = hashlib.blake2b(
+                    path.read_bytes(), digest_size=16
+                ).digest()
+            except FileNotFoundError:
+                # Editors can replace a file between rglob() and read(). The
+                # next polling pass will observe the replacement.
+                continue
+        return snapshot
+
+    def changed(self) -> bool:
+        latest = self._take_snapshot()
+        changed = latest != self.snapshot
+        self.snapshot = latest
+        return changed
+
+
+def uvicorn_command(python_bin: Path, is_windows: bool) -> list[str]:
+    command = [str(python_bin), "-m", "uvicorn", "app.main:app", "--port", "8000"]
+    if not is_windows:
+        command.append("--reload")
+    return command
+
+
+def restart_exited_services(
+    services: list[ServiceProcess], restart_delay: float = 0.5
+) -> None:
+    """Restart exited children individually while leaving healthy ones alone.
+
+    Uvicorn and Vite normally reload inside their own supervisor processes,
+    but that implementation detail and the resulting exit code vary between
+    versions and platforms. An exited wrapper must therefore not be treated as
+    a reason to tear down the entire development stack.
+    """
+    for service in services:
+        process = service.process
+        if process is None:
+            continue
+
+        return_code = process.poll()
+        if return_code is None:
+            continue
+
+        print(
+            f"\n[!] {service.name} exited (code {return_code}). "
+            "Restarting that service..."
+        )
+        if restart_delay:
+            time.sleep(restart_delay)
+        service.start()
 
 
 def get_binaries():
@@ -87,8 +176,10 @@ def step_run_services(python_bin: Path, celery_bin: Path, npm_bin: str, is_windo
     print("[3/3] Starting Backend API (Uvicorn), Background Worker (Celery), and Frontend (Vite)...")
     print("=" * 60)
 
-    # Uvicorn command in backend/
-    uvicorn_cmd = [str(python_bin), "-m", "uvicorn", "app.main:app", "--reload", "--port", "8000"]
+    # Uvicorn's Windows reloader broadcasts CTRL_C_EVENT to every process in
+    # the terminal, including this supervisor. Watch backend sources here on
+    # Windows instead; Uvicorn's native reloader remains enabled elsewhere.
+    uvicorn_cmd = uvicorn_command(python_bin, is_windows)
 
     # Celery command in backend/
     if celery_bin.exists():
@@ -110,61 +201,41 @@ def step_run_services(python_bin: Path, celery_bin: Path, npm_bin: str, is_windo
     print(f"Starting Frontend: {' '.join(frontend_cmd)}")
     print("\nPress Ctrl+C to stop all services.\n")
 
-    processes = []
-    # Track Uvicorn separately so we can restart it on reload exits
-    uvicorn_entry = None
+    services = [
+        ServiceProcess("Uvicorn", uvicorn_cmd, BACKEND_DIR),
+        ServiceProcess("Celery", celery_cmd, BACKEND_DIR),
+        ServiceProcess("Frontend", frontend_cmd, FRONTEND_DIR),
+    ]
+    backend_watcher = PythonSourceWatcher(BACKEND_DIR / "app") if is_windows else None
 
     try:
-        p_uvicorn = subprocess.Popen(uvicorn_cmd, cwd=BACKEND_DIR)
-        uvicorn_entry = ["Uvicorn", p_uvicorn]
-        processes.append(uvicorn_entry)
-
-        p_celery = subprocess.Popen(celery_cmd, cwd=BACKEND_DIR)
-        processes.append(["Celery", p_celery])
-
-        p_frontend = subprocess.Popen(frontend_cmd, cwd=FRONTEND_DIR)
-        processes.append(["Frontend", p_frontend])
+        for service in services:
+            service.start()
 
         # Monitor processes
         while True:
-            for entry in processes:
-                name, proc = entry
-                ret = proc.poll()
-                if ret is None:
-                    continue
-
-                if name == "Uvicorn":
-                    # Exit code 3 = Uvicorn triggered an internal reload; restart it.
-                    # Any other exit code is a real crash — shut everything down.
-                    if ret == 3:
-                        print(f"[i] Uvicorn reloading (exit code 3). Restarting...")
-                        new_proc = subprocess.Popen(uvicorn_cmd, cwd=BACKEND_DIR)
-                        entry[1] = new_proc  # update in-place so finally sees it
-                    else:
-                        print(f"\n[!] Uvicorn crashed (exit code {ret}). Shutting down all services.")
-                        return
-                else:
-                    print(f"\n[!] Process '{name}' exited unexpectedly (exit code {ret}). Shutting down all services.")
-                    return
-
+            if backend_watcher is not None and backend_watcher.changed():
+                print("\n[i] Backend source changed. Restarting Uvicorn...")
+                services[0].restart()
+            restart_exited_services(services)
             time.sleep(0.5)
 
     except KeyboardInterrupt:
         print("\n\n[i] KeyboardInterrupt received. Shutting down development services...")
     finally:
-        for entry in processes:
-            name, proc = entry
-            if proc.poll() is None:
-                print(f"[i] Terminating {name} (PID {proc.pid})...")
-                proc.terminate()
+        for service in services:
+            process = service.process
+            if process is not None and process.poll() is None:
+                print(f"[i] Terminating {service.name} (PID {process.pid})...")
+                process.terminate()
 
         # Wait briefly for graceful shutdown, then kill if still running
         time.sleep(1)
-        for entry in processes:
-            name, proc = entry
-            if proc.poll() is None:
-                print(f"[!] Force killing {name} (PID {proc.pid})...")
-                proc.kill()
+        for service in services:
+            process = service.process
+            if process is not None and process.poll() is None:
+                print(f"[!] Force killing {service.name} (PID {process.pid})...")
+                process.kill()
 
         print("[✓] All development services stopped.")
 

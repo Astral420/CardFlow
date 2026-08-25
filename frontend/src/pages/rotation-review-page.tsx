@@ -205,7 +205,7 @@ export function RotationReviewPage() {
     <div className="flex h-[calc(100vh-48px)] flex-col">
       <PageHeader
         title="Rotation Review"
-        description="Rotate front and back independently, then confirm each pending side."
+        description="Rotate front and back independently, then confirm the pair."
         actions={
           queueCount && queueCount.count > 0 ? (
             <Badge variant="lavender" className="text-body px-3 py-1.5">
@@ -294,7 +294,7 @@ export function RotationReviewPage() {
 
             <Card className="space-y-2 p-4">
               <SectionLabel className="mb-2">Shortcuts</SectionLabel>
-              <ShortcutHint keys={['Space']} label="Confirm next pending" />
+              <ShortcutHint keys={['Space']} label="Confirm pair" />
               <ShortcutHint keys={['F']} label="Front 90 deg" />
               <ShortcutHint keys={['B']} label="Back 90 deg" />
               <ShortcutHint keys={['Right']} label="Skip" />
@@ -312,7 +312,7 @@ export function RotationReviewPage() {
             className="gap-2 min-w-[190px]"
           >
             <CheckCircle2 className="h-4 w-4" />
-            {confirmMutation.isPending ? 'Confirming...' : 'Confirm next pending'}
+            {confirmMutation.isPending ? 'Confirming...' : 'Confirm pair'}
             <ShortcutHint keys={['Space']} label="" className="ml-1" />
           </Button>
           <Button

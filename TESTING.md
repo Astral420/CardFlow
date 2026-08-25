@@ -193,12 +193,11 @@ curl -s -X POST http://localhost:8000/api/review/rotation/12/rotate \
   -d '{"degrees": 180}'
 ```
 
-Confirm each side once it looks right (this queues `hash_crop` for the
-front, per spec — backs aren't hashed):
+Confirm the pair once both sides look right. Either crop ID identifies the
+pair; the backend confirms both sides atomically and queues `hash_crop` for
+the front (backs aren't hashed):
 ```bash
 curl -s -X POST http://localhost:8000/api/review/rotation/12/confirm \
-  -H "Authorization: Bearer $TOKEN"
-curl -s -X POST http://localhost:8000/api/review/rotation/13/confirm \
   -H "Authorization: Bearer $TOKEN"
 ```
 Each `confirm` call returns the next pending pair, so you can loop this

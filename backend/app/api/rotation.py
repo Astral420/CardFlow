@@ -107,12 +107,29 @@ def confirm(
     if crop is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Crop not found")
 
-    crop.rotation_confirmed_at = datetime.now(timezone.utc)
+    # Rotation review is presented as one physical card (front + back), so a
+    # single confirmation must resolve that whole pair. Confirming only the
+    # crop named in the URL leaves its sibling pending; because the queue is
+    # ordered by crop id, that sibling can surface much later and reconstruct
+    # the same pair with one side already marked "Confirmed".
+    sibling = find_sibling_crop(db, crop)
+    pair = (crop, sibling) if sibling is not None else (crop,)
+    confirmed_at = datetime.now(timezone.utc)
+    newly_confirmed = []
+    for pair_crop in pair:
+        if pair_crop.rotation_confirmed_at is None:
+            pair_crop.rotation_confirmed_at = confirmed_at
+            newly_confirmed.append(pair_crop)
+
     batch_id = crop.raw_scan.batch_id
     refresh_batch_status(db, batch_id)
     db.commit()
 
-    enqueue_task(hash_crop, crop_id)
+    # Only fronts are hashed. Restrict dispatch to newly-confirmed rows so a
+    # retried/idempotent confirm request cannot enqueue duplicate hash work.
+    for pair_crop in newly_confirmed:
+        if pair_crop.raw_scan.side == ScanSide.front:
+            enqueue_task(hash_crop, pair_crop.id)
 
     # Note: intentionally global (no batch_id filter), matching the
     # unscoped /next endpoint the review page actually polls. Scoping this

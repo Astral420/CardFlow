@@ -214,6 +214,16 @@ export async function uploadBatch(file: File, sourceLabel?: string) {
   return data;
 }
 
+export async function uploadImages(files: File[], sourceLabel?: string) {
+  const form = new FormData();
+  files.forEach((f) => form.append("files", f));
+  if (sourceLabel) form.append("source_label", sourceLabel);
+  const { data } = await client.post<{ batch_id: number }>("/batches/images", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
+
 export async function forceAdvanceBatch(batchId: number) {
   const { data } = await client.post<BatchDetail>(
     `/batches/${batchId}/force-advance`
