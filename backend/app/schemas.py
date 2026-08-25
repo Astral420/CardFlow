@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models import BatchStatus, DuplicateStatus, ScanSide, ScanStatus, UserRole
 
@@ -75,6 +76,11 @@ class RawScanOut(BaseModel):
     side: ScanSide
     status: ScanStatus
     thumbnail_url: str | None = None
+    raw_image_url: str | None = None
+    crop_failure_reason: Literal["crop_error", "bad_aspect_ratio"] | None = None
+    # Present whenever a CardCrop row exists, including aspect-ratio failures.
+    crop_id: int | None = None
+    rotation_confirmed_at: datetime | None = None
     rotation_degrees: int = 0
     # True for either confirmed_duplicate or intentional_duplicate --
     # "this scan matched another card in the batch". See
@@ -111,6 +117,16 @@ class RotateRequest(BaseModel):
         if normalized not in {90, 180, 270}:
             raise ValueError("Rotation must be 90, 180, 270, or -90 degrees")
         return normalized
+
+
+class BulkRerotationRequest(BaseModel):
+    crop_ids: list[int] = Field(min_length=1)
+
+
+class RerotationResultOut(BaseModel):
+    requeued_count: int
+    batch_id: int
+    batch_status: BatchStatus
 
 
 class QueueCountOut(BaseModel):
@@ -191,4 +207,3 @@ class BatchDuplicatePairOut(BaseModel):
     # side is NOT actually excluded from export, see
     # app.api.batches.export_batch_zip.
     removed: BatchDuplicateCropOut
-

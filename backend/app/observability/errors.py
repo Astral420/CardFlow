@@ -149,13 +149,17 @@ def _envelope(err: ExplainedError) -> dict:
     }
 
 
-async def explained_error_handler(request: Request, exc: ExplainedError) -> JSONResponse:
-    body = _envelope(exc)
+async def explained_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    if not isinstance(exc, ExplainedError):
+        err = translate_exception(exc)
+    else:
+        err = exc
+    body = _envelope(err)
     logger.error(
         "explained error",
-        extra={"status_code": exc.status_code, **{k: v for k, v in body.items() if k != "error_id"}},
+        extra={"status_code": err.status_code, **{k: v for k, v in body.items() if k != "error_id"}},
     )
-    return JSONResponse(status_code=exc.status_code, content=body)
+    return JSONResponse(status_code=err.status_code, content=body)
 
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:

@@ -2,6 +2,7 @@ import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
 import type {
   BatchDetail,
   BatchDuplicatePair,
+  BatchStatus,
   CardCrop,
   CardCropDetail,
   CreateUserPayload,
@@ -214,6 +215,16 @@ export async function uploadBatch(file: File, sourceLabel?: string) {
   return data;
 }
 
+export async function uploadImages(files: File[], sourceLabel?: string) {
+  const form = new FormData();
+  files.forEach((f) => form.append("files", f));
+  if (sourceLabel) form.append("source_label", sourceLabel);
+  const { data } = await client.post<{ batch_id: number }>("/batches/images", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
+
 export async function forceAdvanceBatch(batchId: number) {
   const { data } = await client.post<BatchDetail>(
     `/batches/${batchId}/force-advance`
@@ -275,6 +286,27 @@ export async function rotateCrop(cropId: number, degrees: number) {
 export async function confirmCrop(cropId: number) {
   const { data } = await client.post<RotationNext | null>(
     `/review/rotation/${cropId}/confirm`
+  );
+  return data;
+}
+
+export interface RerotationResult {
+  requeued_count: number;
+  batch_id: number;
+  batch_status: BatchStatus;
+}
+
+export async function requestRerotation(cropId: number) {
+  const { data } = await client.post<RerotationResult>(
+    `/review/rotation/${cropId}/request-rerotation`
+  );
+  return data;
+}
+
+export async function bulkRerotation(cropIds: number[]) {
+  const { data } = await client.post<RerotationResult>(
+    "/review/rotation/bulk-rerotation",
+    { crop_ids: cropIds }
   );
   return data;
 }

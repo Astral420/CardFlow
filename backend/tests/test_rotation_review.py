@@ -1,4 +1,4 @@
-"""Regression coverage for two rotation-review queue bugs:
+"""Regression coverage for rotation-review queue bugs:
 
 1. `confirm()` was narrowing the "next pending" lookup to the just-
    confirmed crop's own batch, so the queue reported empty as soon as one
@@ -9,6 +9,10 @@
    without confirming it -- it would just refetch and get the exact same
    pair back. `_next_pending` needs an `after_id` cursor so skip can
    advance past a specific id.
+3. The UI reviews a front/back pair, but `confirm()` used to confirm only
+   the crop ID sent by the frontend. The still-pending sibling could appear
+   later as the queue advanced and reconstruct the same card with one side
+   already marked confirmed.
 
 These exercise the query logic directly against an in-memory sqlite DB
 rather than going through the FastAPI/auth layers, matching the style of
@@ -126,6 +130,68 @@ def test_confirm_endpoint_returns_next_pending_from_other_batch():
         "a pending rotation review"
     )
     assert result.batch_id == batch_b.id
+
+
+def test_confirm_resolves_whole_pair_and_does_not_return_it_again(monkeypatch):
+    """One pair-level UI confirmation must confirm both underlying crops.
+
+    Crops are deliberately inserted front-A, front-B, back-A, back-B to
+    mirror asynchronous crop workers assigning non-adjacent IDs. With the
+    old side-level confirmation, card A's pending back would return later
+    with its front already marked confirmed.
+    """
+    db = _make_session()
+    batch = Batch(status=BatchStatus.rotation_review)
+    db.add(batch)
+    db.flush()
+
+    a_front = _add_pending_crop(db, batch.id, "card-a", ScanSide.front)
+    _add_pending_crop(db, batch.id, "card-b", ScanSide.front)
+    a_back = _add_pending_crop(db, batch.id, "card-a", ScanSide.back)
+    _add_pending_crop(db, batch.id, "card-b", ScanSide.back)
+    db.commit()
+
+    enqueued_crop_ids = []
+    monkeypatch.setattr(
+        "app.api.rotation.enqueue_task",
+        lambda _task, crop_id: enqueued_crop_ids.append(crop_id),
+    )
+
+    result = confirm(a_front.id, db=db, _user=None)
+
+    db.refresh(a_front)
+    db.refresh(a_back)
+    assert a_front.rotation_confirmed_at is not None
+    assert a_back.rotation_confirmed_at == a_front.rotation_confirmed_at
+    assert result is not None
+    assert result.original_filename == "card-b"
+    assert enqueued_crop_ids == [a_front.id]
+
+    # A repeated request is idempotent and does not dispatch hashing again.
+    confirm(a_front.id, db=db, _user=None)
+    assert enqueued_crop_ids == [a_front.id]
+
+
+def test_confirm_by_back_id_still_hashes_newly_confirmed_front(monkeypatch):
+    db = _make_session()
+    batch = Batch(status=BatchStatus.rotation_review)
+    db.add(batch)
+    db.flush()
+
+    front = _add_pending_crop(db, batch.id, "card-1", ScanSide.front)
+    back = _add_pending_crop(db, batch.id, "card-1", ScanSide.back)
+    db.commit()
+
+    enqueued_crop_ids = []
+    monkeypatch.setattr(
+        "app.api.rotation.enqueue_task",
+        lambda _task, crop_id: enqueued_crop_ids.append(crop_id),
+    )
+
+    assert confirm(back.id, db=db, _user=None) is None
+    assert front.rotation_confirmed_at is not None
+    assert back.rotation_confirmed_at == front.rotation_confirmed_at
+    assert enqueued_crop_ids == [front.id]
 
 
 def test_next_pending_returns_none_when_queue_truly_empty():

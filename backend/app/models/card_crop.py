@@ -27,6 +27,12 @@ class CardCrop(Base):
     rotation_confirmed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    # Front crops are not pipeline-complete until duplicate detection has
+    # finished, including the valid "no matches" result. This durable marker
+    # closes the gap between the separately committed hash and dedup tasks.
+    dedup_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     hash_0: Mapped[str | None] = mapped_column(String, nullable=True)
     hash_90: Mapped[str | None] = mapped_column(String, nullable=True)
