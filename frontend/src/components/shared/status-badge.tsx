@@ -10,6 +10,7 @@ export const BATCH_STATUS_META: Record<
   rotation_review: { label: "Rotation review", variant: "lavender" },
   duplicate_review: { label: "Duplicate review", variant: "lavender" },
   complete: { label: "Complete", variant: "mint" },
+  deleting: { label: "Deleting", variant: "neutral" },
 };
 
 export function BatchStatusBadge({ status }: { status: BatchStatus }) {

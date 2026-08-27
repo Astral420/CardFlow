@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum, String, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -18,6 +18,7 @@ class BatchStatus(str, enum.Enum):
     rotation_review = "rotation_review"
     duplicate_review = "duplicate_review"
     complete = "complete"
+    deleting = "deleting"
 
 
 class Batch(Base):
@@ -33,6 +34,16 @@ class Batch(Base):
         default=BatchStatus.extracting,
         nullable=False,
     )
+    # Durable hand-off metadata for asynchronous deletion. Keeping this on
+    # the batch makes a queued deletion recoverable after API/worker restarts
+    # without treating Celery message arguments as the only source of truth.
+    deletion_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    deletion_previous_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    deletion_requested_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     raw_scans: Mapped[list["RawScan"]] = relationship(
         back_populates="batch", cascade="all, delete-orphan"
@@ -40,4 +51,3 @@ class Batch(Base):
     exports: Mapped[list["BatchExport"]] = relationship(
         back_populates="batch", cascade="all, delete-orphan"
     )
-

@@ -8,7 +8,8 @@ export type BatchStatus =
   | "cropping"
   | "rotation_review"
   | "duplicate_review"
-  | "complete";
+  | "complete"
+  | "deleting";
 
 export type ScanSide = "front" | "back";
 
@@ -154,5 +155,4 @@ export interface BatchDuplicatePair {
   // ship — see backend app.api.batches.export_batch_zip).
   removed: BatchDuplicateCrop;
 }
-
 

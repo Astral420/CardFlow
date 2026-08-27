@@ -7,7 +7,7 @@ from typing import cast
 from celery.app.task import Task
 
 from app import storage
-from app.batch_status import refresh_batch_status
+from app.batch_status import lock_batch_for_pipeline_write, refresh_batch_status
 from app.celery_app import celery_app
 from app.db import SessionLocal
 from app.models import CardCrop, RawScan, ScanStatus
@@ -31,6 +31,9 @@ def _crop_scan(raw_scan_id: int) -> None:
             try:
                 result = auto_crop(raw_bytes)
             except ValueError as exc:
+                if lock_batch_for_pipeline_write(db, batch_id) is None:
+                    db.rollback()
+                    return
                 raw_scan.status = ScanStatus.crop_failed
                 refresh_batch_status(db, batch_id)
                 db.commit()
@@ -42,6 +45,10 @@ def _crop_scan(raw_scan_id: int) -> None:
                     skipped_reason=str(exc),
                 )
                 redis_state.incr_counter("images_crop_failed")
+                return
+
+            if lock_batch_for_pipeline_write(db, batch_id) is None:
+                db.rollback()
                 return
 
             card_crop = CardCrop(

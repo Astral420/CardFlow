@@ -7,7 +7,7 @@ from typing import cast
 from celery.app.task import Task
 
 from app.celery_app import celery_app
-from app.batch_status import refresh_batch_status
+from app.batch_status import lock_batch_for_pipeline_write, refresh_batch_status
 from app.db import SessionLocal
 from app.dedup.matching import (
     find_within_batch_duplicates,
@@ -31,6 +31,9 @@ def _find_duplicates(card_crop_id: int) -> None:
 
         batch_id = raw_scan.batch_id
         with stage("duplicate_detection", batch_id=batch_id, image_name=raw_scan.original_filename):
+            if lock_batch_for_pipeline_write(db, batch_id) is None:
+                db.rollback()
+                return
             hits = find_within_batch_duplicates(db, crop, batch_id)
 
             record_duplicate_candidates(db, crop, hits)

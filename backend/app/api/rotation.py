@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app import storage
 from app.api.common import crop_item, find_sibling_crop
 from app.api.deps import get_current_user_optional, require_reviewer
-from app.batch_status import refresh_batch_status
+from app.batch_status import lock_batch_for_pipeline_write, refresh_batch_status
 from app.db import get_db
 from app.models import (
     Batch,
@@ -66,6 +66,8 @@ def _rerotate_pairs(
     )
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found")
+    if batch.status == BatchStatus.deleting:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Batch is being deleted")
 
     seen_pairs: set[tuple[int, str]] = set()
     front_crop_ids: set[int] = set()
@@ -134,12 +136,14 @@ def _next_pending(
     query = (
         db.query(CardCrop)
         .join(RawScan)
+        .join(Batch, RawScan.batch_id == Batch.id)
         .filter(
             # `skipped` scans (already properly cropped, crop transform
             # skipped) still need a human to confirm rotation, same as
             # `cropped` -- see app.batch_status.refresh_batch_status.
             RawScan.status.in_((ScanStatus.cropped, ScanStatus.skipped)),
             CardCrop.rotation_confirmed_at.is_(None),
+            Batch.status != BatchStatus.deleting,
         )
         .order_by(CardCrop.id)
     )
@@ -183,9 +187,11 @@ def queue_count(
     count = (
         db.query(CardCrop)
         .join(RawScan)
+        .join(Batch, RawScan.batch_id == Batch.id)
         .filter(
             RawScan.status.in_((ScanStatus.cropped, ScanStatus.skipped)),
             CardCrop.rotation_confirmed_at.is_(None),
+            Batch.status != BatchStatus.deleting,
         )
         .count()
     )
@@ -231,6 +237,8 @@ def rotate(
     crop = db.get(CardCrop, crop_id)
     if crop is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Crop not found")
+    if lock_batch_for_pipeline_write(db, crop.raw_scan.batch_id) is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Batch is being deleted")
 
     crop.rotation_degrees = (crop.rotation_degrees + payload.degrees) % 360
     refresh_batch_status(db, crop.raw_scan.batch_id)
@@ -247,6 +255,8 @@ def confirm(
     crop = db.get(CardCrop, crop_id)
     if crop is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Crop not found")
+    if lock_batch_for_pipeline_write(db, crop.raw_scan.batch_id) is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Batch is being deleted")
 
     # Rotation review is presented as one physical card (front + back), so a
     # single confirmation must resolve that whole pair. Confirming only the

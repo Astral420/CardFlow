@@ -23,12 +23,14 @@ By replacing manual OS image viewers and informal spreadsheet tracking, CardFlow
 
 ### ⚡ Computer Vision & Edge Cropping Engine
 * **Automated Contour Detection:** Uses OpenCV Otsu thresholding, `findContours`, `minAreaRect`, and perspective transforms to crop raw scans tightly to card edges.
+* **Edge-to-Edge Refinement:** Applies configurable background scanning to trim residual scan-bed and toploader margins cleanly to physical card borders.
 * **Aspect-Ratio Guard:** Verifies detected contours against standard trading card proportions (`~2.5:3.5`), flagging out-of-tolerance crops for manual review before bad crops can corrupt downstream perceptual hashing.
 * **Pre-cropped Auto-Detection:** Automatically detects intake scans that are already tight to the frame (e.g. device auto-crops or sleeves) via perimeter background ratio checks, applying tailored validation rules.
 
-### 🔄 Hotkey-Driven Rotation Review Queue
+### 🔄 Hotkey-Driven Rotation Review Queue & Re-rotation
 * **Fast Ergonomic Review:** Displays front and back crops side-by-side with hotkey controls (`Space` to confirm, `R` to rotate 180°) for rapid human verification.
 * **Batch Auto-Advancing:** Instantly advances to the next pair upon confirmation, triggering async hashing tasks without blocking UI responsiveness.
+* **Re-rotation Support:** Allows reviewers to re-queue single cards or entire batches for rotation review, automatically invalidating stale downstream hashes, duplicate candidates, and cached exports.
 
 ### 🧠 Dual-Signal Rotation-Invariant Deduplication
 * **Multi-Orientation Perceptual Hashing:** Front images are hashed at four orthogonal rotations (`0°`, `90°`, `180°`, `270°`) using pHash/dHash.
@@ -38,12 +40,14 @@ By replacing manual OS image viewers and informal spreadsheet tracking, CardFlow
 
 ### 🔍 Human-in-the-Loop Duplicate Review & Audit Log
 * **Visual & Quantitative Comparison:** Side-by-side candidate review UI detailing structural distance, HSV color similarity, and scan metadata.
+* **Flexible Decision Modes:** Supports confirming duplicate pairs (`confirmed_duplicate`), keeping intentional duplicates (`intentional_duplicate`), or rejecting candidate matches (`rejected`).
 * **Audited Decision History:** Every duplicate confirmation or rejection records the operator ID, user role, and exact timestamp.
 
-### 📊 Modern Web Dashboard
+### 📊 Modern Web Dashboard & Observability
 * **Built with React 18 + Vite:** Fast, responsive UI powered by Tailwind CSS, Radix UI primitives, Lucide icons, and light/dark theme modes.
-* **Live System Monitoring:** Real-time progress bars, batch queue counters, and system health status indicators (Postgres, Redis, Celery).
-* **Card Log & ZIP Export:** Centralized searchable catalog of all processed cards with direct batch ZIP download capabilities.
+* **Flexible Batch Uploads:** Supports drag-and-drop `.zip` archives or direct folder/multi-image file uploads.
+* **Live System Monitoring & Ops Dashboard:** Real-time progress bars, batch queue counters, component health status indicators, and lightweight ops observability dashboard (`/api/ops/dashboard`).
+* **Card Log & Cached ZIP Export:** Centralized searchable catalog of all processed cards with server-cached, manifest-verified batch ZIP downloads.
 
 ---
 
@@ -110,14 +114,14 @@ flowchart TD
 
 ## 🔄 End-to-End Processing Workflow
 
-1. **Batch Upload (`POST /api/batches`):** Operator uploads a `.zip` archive containing paired scan files named according to client convention (`{id}-front.jpg` and `{id}-back.jpg`).
-2. **Async Extraction:** Celery unzips files, pairs front/back scans into `raw_scans` table entries, uploads originals to R2, and dispatches individual `crop_scan` tasks.
-3. **Edge Crop & Safety Check:** OpenCV detects card contours on scan backgrounds. Valid crops are perspective-warped to standard output dimensions (`750x1050px`) and uploaded to R2. Out-of-tolerance aspect ratios flag `crop_failed` for manual handling.
-4. **Rotation Review:** Reviewers use hotkeys to review front/back crop pairs in the dashboard, flip orientation if inverted (`180°`), and confirm.
+1. **Batch Intake (`POST /api/batches` or `POST /api/batches/images`):** Operator uploads a `.zip` archive or a multi-image folder containing paired scan files (`{id}-front.jpg` and `{id}-back.jpg`).
+2. **Async Extraction:** Celery extracts archives or ingests raw images, pairs front/back scans into `raw_scans` table entries, uploads originals to R2, and dispatches individual `crop_scan` tasks.
+3. **Edge Crop & Safety Check:** OpenCV detects card contours on scan backgrounds, applies edge-to-edge margin refinement, and perspective-warps valid crops to standard output dimensions (`750x1050px`). Out-of-tolerance aspect ratios flag `crop_failed` for manual handling.
+4. **Rotation Review & Re-rotation:** Reviewers use hotkeys to inspect front/back crop pairs in the dashboard, adjust orientation (`180°`), and confirm. Crops can also be re-queued for re-rotation at any point.
 5. **Perceptual Hashing & Color Indexing:** Upon confirmation, front images are hashed at `0°`, `90°`, `180°`, and `270°` for pHash/dHash and region-sampled HSV histograms.
-6. **BK-Tree Candidate Matching:** New cards are queried against the process-cached BK-tree index over historical structural hashes. High-matching candidates undergo HSV color signature verification.
-7. **Duplicate Review UI:** Candidate pairs flagged above threshold appear in the duplicate review queue for side-by-side human confirmation (`confirmed_duplicate` vs `rejected`).
-8. **Permanent Card Log:** Confirmed entries are indexed in the searchable card log for filtering, audit tracking, and ZIP batch exports.
+6. **Candidate Duplicate Matching:** New cards are matched against structural hashes and HSV color signatures to identify potential duplicates.
+7. **Duplicate Review UI:** Flagged candidate pairs appear in the duplicate review queue for side-by-side human decision (`confirmed_duplicate`, `intentional_duplicate`, or `rejected`).
+8. **Catalog & Cached ZIP Export:** Processed cards are indexed in the searchable catalog. Completed batches generate server-cached, manifest-validated ZIP archives for download (excluding confirmed duplicates while preserving intentional duplicates).
 
 ---
 
@@ -141,12 +145,7 @@ cd CardFlow
 cp backend/.env.example backend/.env
 ```
 
-#### 2. Start PostgreSQL & Redis services
-```bash
-docker compose up -d postgres redis
-```
-
-#### 3. Setup Python virtual environment & backend dependencies
+#### 2. Setup Python virtual environment & backend dependencies
 ```bash
 python -m venv backend/.venv
 
@@ -159,38 +158,53 @@ pip install --upgrade pip
 pip install -r backend/requirements.txt
 ```
 
-#### 4. Run database migrations & seed initial admin user
-```bash
-# Run migrations from root
-python -c "import os; os.chdir('backend'); from alembic.config import main; main(argv=['upgrade', 'head'])"
-
-# Seed default admin user
-cd backend
-python scripts/seed_users.py "AdminUser" admin
-cd ..
-```
-
-#### 5. Start API server & Celery worker
-In Terminal 1 (API Server):
-```bash
-cd backend
-python -m uvicorn app.main:app --reload --port 8000
-```
-
-In Terminal 2 (Celery Worker):
-```bash
-cd backend
-# Windows requires --pool=solo
-celery -A app.celery_app worker --loglevel=info --pool=solo
-```
-
-#### 6. Setup & start Frontend application
-In Terminal 3 (Frontend):
+#### 3. Setup Frontend dependencies
 ```bash
 cd frontend
 npm install
-npm run dev
+cd ..
 ```
+
+#### 4. Run Development Stack
+
+**Option A: Automated Runner (Recommended)**
+Automatically starts PostgreSQL & Redis containers, applies database migrations, and boots Uvicorn, Celery, and Vite:
+```bash
+python scripts/dev.py
+```
+
+**Option B: Manual Service Startup**
+1. Start database & cache:
+   ```bash
+   docker compose up -d postgres redis
+   ```
+2. Run database migrations & seed initial admin user:
+   ```bash
+   # Run migrations
+   python -c "import os; os.chdir('backend'); from alembic.config import main; main(argv=['upgrade', 'head'])"
+
+   # Seed default admin user
+   cd backend
+   python scripts/seed_users.py "AdminUser" admin
+   cd ..
+   ```
+3. Start API Server (Terminal 1):
+   ```bash
+   cd backend
+   python -m uvicorn app.main:app --reload --port 8000
+   ```
+4. Start Celery Worker (Terminal 2):
+   ```bash
+   cd backend
+   # Windows requires --pool=solo
+   celery -A app.celery_app worker --loglevel=info --pool=solo
+   ```
+5. Start Frontend (Terminal 3):
+   ```bash
+   cd frontend
+   npm run dev
+   ```
+
 Open **http://localhost:5173** in your browser and log in with your configured app passcode (defaults to `change-me` in `.env.example`).
 
 ---
@@ -216,19 +230,34 @@ npm run build
 
 | Endpoint | Method | Role Required | Description |
 |---|---|---|---|
-| `/api/auth/login` | `POST` | Public | Authenticates user with passcode & display name; sets refresh cookie |
+| `/api/auth/login` | `POST` | Public | Authenticates user with credentials/passcode; sets refresh cookie |
 | `/api/auth/refresh` | `POST` | Public | Exchanges httpOnly refresh cookie for a new JWT access token |
-| `/api/auth/logout` | `POST` | Authenticated | Revokes current JWT access token and clears refresh cookie |
-| `/api/users` | `GET` / `POST` | `admin` | List all system users or create new users with specific roles |
-| `/api/batches` | `GET` / `POST` | `operator` | List batches or upload a new scan archive `.zip` |
-| `/api/batches/{id}/export-zip` | `POST` | `operator` | Generates a downloadable ZIP of cropped card images |
-| `/api/review/rotation/next` | `GET` | `reviewer` | Fetches the next unconfirmed front/back crop pair for rotation review |
+| `/api/auth/logout` | `POST` | Authenticated | Revokes current refresh token and clears session cookie |
+| `/api/auth/me` | `GET` | Authenticated | Returns current authenticated user profile |
+| `/api/users` | `GET` / `POST` | `admin` | List all system users or create new reviewer accounts |
+| `/api/users/{id}` | `DELETE` | `admin` | Deletes a reviewer account and revokes active sessions |
+| `/api/batches` | `GET` / `POST` | `reviewer` | List batches or upload a new scan archive `.zip` |
+| `/api/batches/images` | `POST` | `reviewer` | Upload multiple raw scan images directly |
+| `/api/batches/{id}` | `GET` | Authenticated | Get batch status details and aggregate processing counts |
+| `/api/batches/{id}/scans` | `GET` | Authenticated | List all raw scans and crop statuses for a batch |
+| `/api/batches/{id}/duplicates` | `GET` | Authenticated | List resolved duplicate pairs and decisions for a batch |
+| `/api/batches/{id}/export` | `GET` | `reviewer` | Downloads (or serves cached) ZIP of non-duplicate cropped cards |
+| `/api/batches/{id}/force-advance` | `POST` | `admin` | Marks stuck pending scans as failed to unblock batch progression |
+| `/api/batches/{id}` | `DELETE` | `admin` | Durably marks batch for deletion and enqueues background purge |
+| `/api/review/rotation/next` | `GET` | Authenticated | Fetches the next unconfirmed front/back crop pair for rotation review |
+| `/api/review/rotation/queue-count` | `GET` | Authenticated | Returns count of crops awaiting rotation review |
 | `/api/review/rotation/{crop_id}/rotate` | `POST` | `reviewer` | Flips crop image orientation by 180° |
-| `/api/review/rotation/{crop_id}/confirm` | `POST` | `reviewer` | Confirms crop orientation and triggers hashing pipeline |
-| `/api/review/duplicates/next` | `GET` | `reviewer` | Fetches the next flagged duplicate candidate pair |
-| `/api/review/duplicates/{id}/decision` | `POST` | `reviewer` | Confirms (`confirmed_duplicate`) or rejects (`rejected`) candidate pair |
+| `/api/review/rotation/{crop_id}/confirm` | `POST` | `reviewer` | Confirms crop pair orientation and dispatches hashing tasks |
+| `/api/review/rotation/{crop_id}/request-rerotation` | `POST` | `reviewer` | Re-queues a crop pair for rotation review and invalidates dedup/exports |
+| `/api/review/rotation/bulk-rerotation` | `POST` | `reviewer` | Re-queues multiple crop pairs in a batch for rotation review |
+| `/api/review/duplicates/next` | `GET` | Authenticated | Fetches the next flagged duplicate candidate pair |
+| `/api/review/duplicates/queue-count` | `GET` | Authenticated | Returns count of duplicate candidates awaiting review |
+| `/api/review/duplicates/{id}/decision` | `POST` | `reviewer` | Submits duplicate decision (`confirmed_duplicate`, `intentional_duplicate`, `rejected`) |
 | `/api/cards` | `GET` | Authenticated | Search, filter, and paginate through processed card crops |
+| `/api/cards/{crop_id}` | `GET` | Authenticated | Returns detailed crop data, sibling scan, hashes, and duplicate history |
 | `/api/health` | `GET` | Public | Returns API service operational status |
+| `/api/health/pipeline` | `GET` | Public | Returns detailed pipeline observability metrics, stage timings, and worker health |
+| `/api/ops/dashboard` | `GET` | Public / Token | Renders lightweight HTML/JS pipeline observability dashboard |
 
 ---
 
@@ -237,11 +266,14 @@ npm run build
 CardFlow exposes key computer vision and deduplication parameters in `backend/app/config.py` (or via environment variables) for fine-tuning against specific scan hardware or card sets:
 
 ```ini
-# Crop Pipeline Safety Controls
+# Crop Pipeline Safety & Refinement Controls
 CROP_OUTPUT_WIDTH=750
 CROP_OUTPUT_HEIGHT=1050
 EXPECTED_CARD_ASPECT_RATIO=1.4 # (3.5 / 2.5)
 ASPECT_RATIO_TOLERANCE=0.15   # Max allowed variance before flagging crop_failed
+CROP_REFINE_ENABLED=true      # Refines contour bounds to crop cards edge-to-edge
+CROP_REFINE_BG_THRESHOLD=12   # Grayscale threshold to trim residual scan margins
+CROP_REFINE_MAX_TRIM_FRACTION=0.15 # Safety cap for edge refinement trimming
 PRECROPPED_PERIMETER_BG_MAX_FRACTION=0.8 # Border threshold for pre-cropped detection
 
 # Duplicate Detection Thresholds
@@ -278,14 +310,17 @@ CardFlow/
 ├── backend/
 │   ├── alembic/                # Database schema migrations
 │   ├── app/
-│   │   ├── api/                # FastAPI routers (auth, batches, cards, duplicates, rotation, users)
+│   │   ├── api/                # FastAPI routers (auth, batches, cards, duplicates, health, ops, rotation, users)
+│   │   ├── commands/           # CLI management commands (stuck deletion retry)
 │   │   ├── dedup/              # BK-tree metric index & candidate matching algorithms
-│   │   ├── models/             # SQLAlchemy ORM models (Batch, RawScan, CardCrop, Candidate, User)
-│   │   ├── tasks/              # Celery tasks (unzip, crop, hash, deduplicate)
+│   │   ├── models/             # SQLAlchemy ORM models (Batch, BatchExport, RawScan, CardCrop, DuplicateCandidate, User)
+│   │   ├── observability/      # Pipeline event logging, Redis state tracking, error capture
+│   │   ├── tasks/              # Celery tasks (unzip, crop, hash, deduplicate, deletion)
+│   │   ├── templates/          # HTML templates (Ops dashboard)
 │   │   ├── vision/             # OpenCV cropping, Otsu thresholding, pHash & HSV color processing
 │   │   ├── config.py           # Pydantic environment configuration
 │   │   ├── main.py             # FastAPI app initialization & CORS setup
-│   │   └── security.py         # JWT tokens, RBAC permission guards, passcodes
+│   │   └── security.py         # JWT tokens, RBAC permission guards, password hashing
 │   ├── scripts/                # Database seed scripts
 │   ├── tests/                  # Pytest test suite
 │   ├── Dockerfile              # Backend container definition
@@ -301,6 +336,8 @@ CardFlow/
 │   ├── package.json            # Node.js dependencies
 │   ├── tailwind.config.ts      # Tailwind CSS styling configuration
 │   └── vite.config.ts          # Vite build configuration
+├── scripts/
+│   └── dev.py                  # Local development environment orchestrator
 ├── docker-compose.yml          # Local development stack (Postgres + Redis + API + Worker)
 ├── docker-compose.prod.yml     # Production Docker Compose stack
 ├── PLAN.md                     # Project task roadmap & phase tracking

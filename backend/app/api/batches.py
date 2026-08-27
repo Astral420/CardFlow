@@ -2,6 +2,7 @@ import hashlib
 import io
 import logging
 import zipfile
+from datetime import datetime, timezone
 
 from fastapi import (
     APIRouter,
@@ -21,11 +22,10 @@ from sqlalchemy.orm import Session
 
 from app import storage
 from app.api.deps import get_current_user_optional, require_admin, require_reviewer
-from app.batch_status import refresh_batch_status
+from app.batch_status import lock_batch_for_pipeline_write, refresh_batch_status
 from app.db import get_db
 from app.models import (
     Batch,
-    BatchAuditLog,
     BatchExport,
     BatchStatus,
     CardCrop,
@@ -51,6 +51,7 @@ from app.naming import parse_side
 from app.observability import redis_state
 from app.observability.events import log_event, stage
 from app.tasks.crop import crop_scan
+from app.tasks.deletion import delete_batch_task
 from app.tasks.dispatch import enqueue_task
 from app.tasks.extract import extract_batch
 from app.vision.hashing import decode_image, encode_jpeg, rotate_image
@@ -198,12 +199,18 @@ def list_batches(
     db: Session = Depends(get_db),
     _user=Depends(get_current_user_optional),
 ) -> list[BatchDetailOut]:
-    batches = db.query(Batch).order_by(Batch.created_at.desc()).limit(limit).all()
+    batches = (
+        db.query(Batch)
+        .filter(Batch.status != BatchStatus.deleting)
+        .order_by(Batch.created_at.desc())
+        .limit(limit)
+        .with_for_update()
+        .all()
+    )
     for batch in batches:
         if batch.status != BatchStatus.complete:
             refresh_batch_status(db, batch.id)
-    db.commit()
-    return [
+    result = [
         BatchDetailOut(
             id=batch.id,
             created_at=batch.created_at,
@@ -213,6 +220,8 @@ def list_batches(
         )
         for batch in batches
     ]
+    db.commit()
+    return result
 
 
 @router.post(
@@ -229,13 +238,25 @@ async def upload_batch(
 
     batch = Batch(source_label=source_label, status=BatchStatus.extracting)
     db.add(batch)
-    db.commit()
-    db.refresh(batch)
-
-    zip_bytes = await file.read()
-    storage.upload_bytes(
-        storage.temp_upload_key(batch.id), zip_bytes, content_type="application/zip"
-    )
+    uploaded_key: str | None = None
+    try:
+        db.flush()
+        zip_bytes = await file.read()
+        uploaded_key = storage.temp_upload_key(batch.id)
+        storage.upload_bytes(uploaded_key, zip_bytes, content_type="application/zip")
+        db.commit()
+    except Exception:
+        db.rollback()
+        if uploaded_key is not None:
+            try:
+                storage.delete_object(uploaded_key)
+            except Exception:
+                logger.warning(
+                    "could not clean up ZIP after upload failure",
+                    exc_info=True,
+                    extra={"r2_key": uploaded_key},
+                )
+        raise
 
     log_event(
         "ZIP uploaded",
@@ -461,20 +482,24 @@ def get_batch(
     db: Session = Depends(get_db),
     _user=Depends(get_current_user_optional),
 ) -> BatchDetailOut:
-    batch = db.get(Batch, batch_id)
+    batch = (
+        db.query(Batch)
+        .filter(Batch.id == batch_id)
+        .with_for_update()
+        .one_or_none()
+    )
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found")
     refresh_batch_status(db, batch_id)
-    db.commit()
-    db.refresh(batch)
-
-    return BatchDetailOut(
+    result = BatchDetailOut(
         id=batch.id,
         created_at=batch.created_at,
         source_label=batch.source_label,
         status=batch.status,
         counts=_batch_counts(db, batch_id),
     )
+    db.commit()
+    return result
 
 
 @router.get("/{batch_id}/scans", response_model=list[RawScanOut])
@@ -565,9 +590,12 @@ def force_advance_batch(
     This unblocks batches where a Celery worker crashed before it could update
     the scan status, leaving scans permanently stuck in 'pending'.
     """
-    batch = db.get(Batch, batch_id)
+    batch = lock_batch_for_pipeline_write(db, batch_id)
     if batch is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found")
+        existing = db.get(Batch, batch_id)
+        if existing is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found")
+        raise HTTPException(status.HTTP_409_CONFLICT, "Batch is being deleted")
 
     if batch.status != BatchStatus.cropping:
         raise HTTPException(
@@ -611,6 +639,9 @@ def export_batch_zip(
     batch = db.get(Batch, batch_id)
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found")
+
+    if batch.status == BatchStatus.deleting:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Batch is being deleted")
 
     refresh_batch_status(db, batch_id)
     db.commit()
@@ -882,147 +913,58 @@ def export_batch_zip(
 
 
 
-@router.delete("/{batch_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{batch_id}", status_code=status.HTTP_202_ACCEPTED)
 def delete_batch(
     batch_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(require_admin),
-) -> None:
-    """Hard-delete a batch: delete DB rows within transaction, then remove R2 objects.
-
-    Steps (in order):
-      1. Load the batch (404 if missing).
-      2. Collect every R2 key associated with this batch (raw, crops, temp, and cached exports)
-         and snapshot metadata.
-      3. Create a BatchAuditLog row and cascade-delete the Batch row in Postgres.
-      4. Commit the DB transaction. If this fails, the transaction rolls back
-         and no storage objects are deleted.
-      5. Delete each object from R2 via storage.delete_object -- failures are
-         non-fatal (logged and updated in the audit log).
-      6. Update BatchAuditLog with actual R2 delete results.
-      7. Structured log event (audit trail in centralized logs).
-      8. Push a best-effort summary entry to obs:recent_batch_deletes (Redis).
-
-    Auth: admin only (403 for reviewers and guests).
-    """
-    batch = db.get(Batch, batch_id)
+) -> dict[str, int | str]:
+    """Durably mark a batch for deletion and enqueue the hard-delete task."""
+    # The row lock makes two concurrent DELETE requests deterministic and
+    # serializes this transition against final pipeline/export publication.
+    batch = (
+        db.query(Batch)
+        .filter(Batch.id == batch_id)
+        .with_for_update()
+        .one_or_none()
+    )
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found")
+    if batch.status == BatchStatus.deleting:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Batch is already being deleted")
 
-    # ------------------------------------------------------------------ #
-    # 1. Collect R2 keys and snapshot batch metadata                       #
-    # ------------------------------------------------------------------ #
-    r2_keys: list[str] = []
-
-    # Temp upload ZIP (may or may not still exist -- delete_object is idempotent)
-    r2_keys.append(storage.temp_upload_key(batch_id))
-
-    # Raw scan images
-    scans = db.query(RawScan).filter(RawScan.batch_id == batch_id).all()
-    for scan in scans:
-        if scan.r2_key_raw:
-            r2_keys.append(scan.r2_key_raw)
-
-    # Cropped card images
-    crop_ids = [scan.crop.id for scan in scans if scan.crop is not None]
-    if crop_ids:
-        crops = db.query(CardCrop).filter(CardCrop.id.in_(crop_ids)).all()
-        for crop in crops:
-            if crop.r2_key_cropped:
-                r2_keys.append(crop.r2_key_cropped)
-
-    # Cached export archives (collect before cascade delete in Step 2)
-    batch_exports = db.query(BatchExport).filter(BatchExport.batch_id == batch_id).all()
-    for exp in batch_exports:
-        if exp.r2_key:
-            r2_keys.append(exp.r2_key)
-
-
-    scan_count = len(scans)
-    batch_source_label = batch.source_label
-    batch_status_val = batch.status.value if batch.status else None
-
-    # ------------------------------------------------------------------ #
-    # 2. Write durable Postgres audit log & cascade-delete DB rows       #
-    # ------------------------------------------------------------------ #
-    audit = BatchAuditLog(
-        batch_id=batch_id,
-        performed_by=current_user.id,
-        action="hard_delete",
-        source_label=batch_source_label,
-        batch_status=batch_status_val,
-        scan_count=scan_count,
-        r2_keys_deleted=0,
-        r2_keys_failed=0,
-        notes=None,
-    )
-    db.add(audit)
-    db.delete(batch)
+    batch.deletion_previous_status = batch.status.value
+    batch.deletion_requested_at = datetime.now(timezone.utc)
+    batch.deletion_requested_by = current_user.id
+    batch.status = BatchStatus.deleting
     db.commit()
 
-    # ------------------------------------------------------------------ #
-    # 3. Delete R2 objects (post-commit, non-fatal on individual failure) #
-    # ------------------------------------------------------------------ #
-    r2_deleted = 0
-    r2_failed = 0
-    r2_failure_notes: list[str] = []
-
-    for key in r2_keys:
-        try:
-            storage.delete_object(key)
-            r2_deleted += 1
-        except Exception as exc:
-            r2_failed += 1
-            r2_failure_notes.append(f"{key}: {exc}")
-            logger.warning(
-                "R2 delete failed for key %s (batch %d): %s",
-                key,
-                batch_id,
-                exc,
-                extra={"batch_id": batch_id, "r2_key": key},
-            )
-
-    notes_str = "; ".join(r2_failure_notes) if r2_failure_notes else None
     try:
-        audit.r2_keys_deleted = r2_deleted
-        audit.r2_keys_failed = r2_failed
-        audit.notes = notes_str
-        db.commit()
-    except Exception as exc:
-        logger.warning(
-            "Failed to update audit log for batch %d with R2 results: %s",
-            batch_id,
-            exc,
+        dispatched = enqueue_task(delete_batch_task, batch_id)
+    except Exception:
+        logger.exception("Unexpected failure dispatching deletion for batch %d", batch_id)
+        dispatched = False
+
+    if not dispatched:
+        # No task owns the durable request, so restore it synchronously.
+        db.expire_all()
+        pending_batch = db.get(Batch, batch_id)
+        # An ambiguous publish failure can occur after the broker accepted the
+        # message. If the worker already completed, the requested outcome won.
+        if pending_batch is None:
+            return {"status": "deleting", "batch_id": batch_id}
+        if pending_batch.status == BatchStatus.deleting:
+            pending_batch.status = BatchStatus(pending_batch.deletion_previous_status)
+            pending_batch.deletion_requested_at = None
+            pending_batch.deletion_previous_status = None
+            pending_batch.deletion_requested_by = None
+            db.commit()
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Deletion service temporarily unavailable. Please try again.",
         )
 
-    # ------------------------------------------------------------------ #
-    # 4. Structured log event                                              #
-    # ------------------------------------------------------------------ #
-    log_event(
-        "batch hard deleted",
-        batch_id=batch_id,
-        performed_by=current_user.id,
-        source_label=batch_source_label,
-        scan_count=scan_count,
-        r2_keys_deleted=r2_deleted,
-        r2_keys_failed=r2_failed,
-    )
-
-    # ------------------------------------------------------------------ #
-    # 5. Best-effort Redis feed for the ops dashboard                      #
-    # ------------------------------------------------------------------ #
-    redis_state.push_recent(
-        "obs:recent_batch_deletes",
-        {
-            "batch_id": batch_id,
-            "source_label": batch_source_label,
-            "performed_by": current_user.id,
-            "scan_count": scan_count,
-            "r2_keys_deleted": r2_deleted,
-            "r2_keys_failed": r2_failed,
-            "at": redis_state.now_iso(),
-        },
-    )
+    return {"status": "deleting", "batch_id": batch_id}
 
 
 @router.get("/{batch_id}/duplicates", response_model=list[BatchDuplicatePairOut])

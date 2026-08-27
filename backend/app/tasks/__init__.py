@@ -3,4 +3,4 @@
 # .delay()/.apply_async() silently falls back to Celery's bare default app
 # (amqp://localhost, not our configured Redis broker).
 from app.celery_app import celery_app  # noqa: F401
-from app.tasks import crop, duplicates, extract, hashing  # noqa: E402,F401
+from app.tasks import crop, deletion, duplicates, extract, hashing  # noqa: E402,F401

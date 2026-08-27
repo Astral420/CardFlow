@@ -8,6 +8,7 @@ from typing import cast
 from celery.app.task import Task
 
 from app import storage
+from app.batch_status import lock_batch_for_pipeline_write
 from app.celery_app import celery_app
 from app.db import SessionLocal
 from app.models import CardCrop, RawScan, ScanSide
@@ -37,7 +38,6 @@ def _hash_crop(card_crop_id: int) -> None:
 
         batch_id = raw_scan.batch_id
         with stage("hashing", batch_id=batch_id, image_name=raw_scan.original_filename):
-            crop.dedup_completed_at = None
             image_bytes = storage.download_bytes(crop.r2_key_cropped)
 
             if crop.rotation_degrees % 360:
@@ -46,6 +46,10 @@ def _hash_crop(card_crop_id: int) -> None:
                 image_bytes = encode_jpeg(image)
 
             results = hash_and_color_at_all_rotations(image_bytes)
+            if lock_batch_for_pipeline_write(db, batch_id) is None:
+                db.rollback()
+                return
+            crop.dedup_completed_at = None
             crop.hash_0, crop.color_sig_0 = results[0]
             crop.hash_90, crop.color_sig_90 = results[90]
             crop.hash_180, crop.color_sig_180 = results[180]
