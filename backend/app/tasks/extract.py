@@ -10,6 +10,7 @@ from typing import cast
 from celery.app.task import Task
 
 from app import storage
+from app.batch_status import lock_batch_for_pipeline_write
 from app.celery_app import celery_app
 from app.db import SessionLocal
 from app.models import Batch, BatchStatus, RawScan, ScanStatus
@@ -34,10 +35,10 @@ def _extract_batch(batch_id: int, zip_filename: str | None = None) -> None:
     with stage("zip_extraction", batch_id=batch_id, zip_filename=zip_filename):
         db = SessionLocal()
         try:
-            batch = db.get(Batch, batch_id)
+            batch = lock_batch_for_pipeline_write(db, batch_id)
             if batch is None:
                 log_event(
-                    "extract_batch: batch not found, skipping",
+                    "extract_batch: batch missing or deleting, skipping",
                     batch_id=batch_id,
                     zip_filename=zip_filename,
                 )

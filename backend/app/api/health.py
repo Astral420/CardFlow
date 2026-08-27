@@ -18,7 +18,7 @@ health-check and dashboard writeup.
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import redis
 from fastapi import APIRouter, Depends
@@ -29,7 +29,7 @@ from app import storage
 from app.celery_app import celery_app
 from app.config import settings
 from app.db import get_db
-from app.models import Batch
+from app.models import Batch, BatchStatus
 from app.observability import redis_state
 from app.redis_client import redis_client
 
@@ -166,6 +166,45 @@ def health_pipeline(db: Session = Depends(get_db)) -> dict:
 
     celery_status = health_celery()
     redis_status = health_redis()
+    deleting_rows = (
+        db.query(Batch)
+        .filter(Batch.status == BatchStatus.deleting)
+        .order_by(Batch.deletion_requested_at, Batch.id)
+        .all()
+    )
+    now = datetime.now(timezone.utc)
+    deleting_batches = []
+    for batch in deleting_rows:
+        requested_at = batch.deletion_requested_at
+        if requested_at is not None and requested_at.tzinfo is None:
+            requested_at = requested_at.replace(tzinfo=now.tzinfo)
+        age_seconds = int((now - requested_at).total_seconds()) if requested_at else None
+        deleting_batches.append(
+            {
+                "batch_id": batch.id,
+                "source_label": batch.source_label,
+                "requested_at": requested_at.isoformat() if requested_at else None,
+                "age_seconds": age_seconds,
+            }
+        )
+
+    alerts = _derive_alerts(
+        celery_status=celery_status,
+        redis_status=redis_status,
+        active_batches=active_batches,
+        tasks_started=tasks_started,
+        tasks_failed=tasks_failed,
+    )
+    stale_deletions = [
+        item for item in deleting_batches
+        if item["age_seconds"] is None or item["age_seconds"] >= 300
+    ]
+    if stale_deletions:
+        ids = ", ".join(str(item["batch_id"]) for item in stale_deletions)
+        alerts.append(
+            "Stuck batch deletion(s): " + ids + ". Run "
+            "`python -m app.commands.retry_stuck_deletions` on the backend."
+        )
 
     return {
         "generated_at": redis_state.now_iso(),
@@ -175,6 +214,7 @@ def health_pipeline(db: Session = Depends(get_db)) -> dict:
         "recent_exports": redis_state.get_recent("obs:recent_exports", limit=15),
         "recent_failures": redis_state.get_recent("obs:recent_failures", limit=20),
         "recent_batch_deletes": redis_state.get_recent("obs:recent_batch_deletes", limit=15),
+        "deleting_batches": deleting_batches,
         "stage_timings": redis_state.stage_summary(),
         "task_counters": {
             "started": tasks_started,
@@ -185,11 +225,5 @@ def health_pipeline(db: Session = Depends(get_db)) -> dict:
         },
         "celery": celery_status,
         "redis": redis_status,
-        "alerts": _derive_alerts(
-            celery_status=celery_status,
-            redis_status=redis_status,
-            active_batches=active_batches,
-            tasks_started=tasks_started,
-            tasks_failed=tasks_failed,
-        ),
+        "alerts": alerts,
     }

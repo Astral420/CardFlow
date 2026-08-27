@@ -14,6 +14,24 @@ from app.models import (
 from app.observability import redis_state
 
 
+def lock_batch_for_pipeline_write(db: Session, batch_id: int) -> Batch | None:
+    """Lock a batch before a worker's final write and reject deletion races.
+
+    A delete request takes the same row lock before setting ``deleting``.
+    Work that reached this lock first may finish atomically; work that arrives
+    after the transition observes ``deleting`` and must not publish artifacts.
+    """
+    batch = (
+        db.query(Batch)
+        .filter(Batch.id == batch_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if batch is None or batch.status == BatchStatus.deleting:
+        return None
+    return batch
+
+
 def refresh_batch_status(db: Session, batch_id: int) -> BatchStatus | None:
     """Derive and persist the current batch pipeline status.
 
@@ -36,7 +54,7 @@ def refresh_batch_status(db: Session, batch_id: int) -> BatchStatus | None:
     # "duplicate_review" the next time its status happened to be refreshed
     # (e.g. viewing its detail page, or resolving that candidate in the
     # review queue), even though nothing in that batch itself is unfinished.
-    if batch.status == BatchStatus.complete:
+    if batch.status in (BatchStatus.complete, BatchStatus.deleting):
         return batch.status
 
     scans_count = (

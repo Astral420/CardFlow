@@ -9,28 +9,31 @@
  *
  *   Step 2 — Type-to-confirm
  *     User must type the batch name (source_label or "Batch #<id>") before the
- *     destructive confirm button activates.  This pattern is standard for
+ *     destructive confirm button activates. This pattern is standard for
  *     unrecoverable destructive actions (GitHub, Vercel, AWS) and ensures
  *     color alone is not the only safeguard (ui-ux-pro-max checklist).
  *
- * On success: invalidates ['batches'] query, navigates back to /batches.
- * On error: dialog stays open, error shown inline.
- * During in-flight: all close paths (Escape, overlay, X, Cancel) are blocked.
+ * Optimistic UX Flow:
+ *   On confirm: dialog closes instantly, optimistic deletion removes batch
+ *   from cache, user is navigated to /batches, and a persistent loading toast
+ *   tracks background Celery progress. On failure, cache is rolled back and
+ *   toast transitions to error.
  */
 
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Trash2, Loader2, ShieldAlert } from 'lucide-react'
+import { AlertTriangle, Trash2, ShieldAlert } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { deleteBatch, apiErrorMessage } from '@/lib/api'
-import type { BatchDetail } from '@/lib/types'
+import { useToast } from '@/components/ui/toast'
+import type { Batch, BatchDetail } from '@/lib/types'
 
 interface DeleteBatchDialogProps {
-  batch: BatchDetail
+  batch: BatchDetail | Batch
   trigger: React.ReactNode
 }
 
@@ -44,24 +47,78 @@ export function DeleteBatchDialog({ batch, trigger }: DeleteBatchDialogProps) {
 
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const { toast, update: updateToast } = useToast()
 
   const batchLabel = batch.source_label ?? `Batch #${batch.id}`
   const confirmMatch = typed.trim() === batchLabel.trim()
+  const toastId = `delete-batch-${batch.id}`
 
   const mutation = useMutation({
     mutationFn: () => deleteBatch(batch.id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['batches'] })
+
+    onMutate: async () => {
+      // 1. Cancel in-flight list and detail queries
+      await queryClient.cancelQueries({ queryKey: ['batches'] })
+      await queryClient.cancelQueries({ queryKey: ['batch', batch.id] })
+
+      // 2. Snapshot previous list state for rollback
+      const previousBatches = queryClient.getQueryData<Batch[]>(['batches'])
+
+      // 3. Optimistic removal from batch list cache
+      queryClient.setQueryData<Batch[]>(['batches'], (old) =>
+        old ? old.filter((b) => b.id !== batch.id) : []
+      )
+
+      // 4. Mark single batch detail as deleting in cache
+      queryClient.setQueryData<BatchDetail>(['batch', batch.id], (old) =>
+        old ? { ...old, status: 'deleting' } : undefined
+      )
+
+      // 5. Fire persistent loading toast
+      toast({
+        id: toastId,
+        variant: 'loading',
+        title: `Deleting ${batchLabel}…`,
+        description: 'Removing images and records in background.',
+        persistent: true,
+      })
+
+      // 6. Instantly close modal and unblock user navigation
       setOpen(false)
       navigate('/batches')
+
+      return { previousBatches }
     },
-    onError: (err) => {
-      setError(apiErrorMessage(err))
+
+    onSuccess: () => {
+      updateToast(toastId, {
+        variant: 'success',
+        title: `${batchLabel} deleted`,
+        description: undefined,
+        persistent: false,
+      })
+      queryClient.invalidateQueries({ queryKey: ['batches'] })
+      queryClient.removeQueries({ queryKey: ['batch', batch.id] })
+      queryClient.removeQueries({ queryKey: ['batch-scans', batch.id] })
+      queryClient.removeQueries({ queryKey: ['batch-duplicates', batch.id] })
+    },
+
+    onError: (err, _vars, context) => {
+      if (context?.previousBatches) {
+        queryClient.setQueryData(['batches'], context.previousBatches)
+      }
+      queryClient.invalidateQueries({ queryKey: ['batch', batch.id] })
+
+      updateToast(toastId, {
+        variant: 'error',
+        title: `Failed to delete ${batchLabel}`,
+        description: apiErrorMessage(err),
+        persistent: false,
+      })
     },
   })
 
   function handleOpenChange(next: boolean) {
-    // Block all close paths while deletion is in-flight.
     if (mutation.isPending) return
     if (!next) {
       // Reset to initial state when dialog closes.
@@ -78,7 +135,11 @@ export function DeleteBatchDialog({ batch, trigger }: DeleteBatchDialogProps) {
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent
         title="Delete batch"
-        description={step === 'warning' ? 'Review what will be permanently removed.' : `Type the batch name to confirm.`}
+        description={
+          step === 'warning'
+            ? 'Review what will be permanently removed.'
+            : 'Type the batch name to confirm.'
+        }
         className="max-w-md"
       >
         <AnimatePresence mode="wait" initial={false}>
@@ -129,10 +190,12 @@ export function DeleteBatchDialog({ batch, trigger }: DeleteBatchDialogProps) {
                   Batch to delete
                 </p>
                 <p className="mt-1 truncate text-body font-medium text-primary">{batchLabel}</p>
-                <p className="mt-0.5 text-caption text-muted-foreground">
-                  {batch.counts.scans} scan{batch.counts.scans !== 1 ? 's' : ''} ·{' '}
-                  {batch.counts.cropped + batch.counts.skipped} cropped
-                </p>
+                {'counts' in batch && batch.counts && (
+                  <p className="mt-0.5 text-caption text-muted-foreground">
+                    {batch.counts.scans} scan{batch.counts.scans !== 1 ? 's' : ''} ·{' '}
+                    {batch.counts.cropped + batch.counts.skipped} cropped
+                  </p>
+                )}
               </div>
 
               <div className="flex justify-end gap-2">
@@ -227,17 +290,8 @@ export function DeleteBatchDialog({ batch, trigger }: DeleteBatchDialogProps) {
                   aria-label="Confirm permanent batch deletion"
                   className="gap-2"
                 >
-                  {mutation.isPending ? (
-                    <>
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      Deleting…
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Delete batch permanently
-                    </>
-                  )}
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete batch permanently
                 </Button>
               </div>
             </motion.div>
@@ -247,3 +301,4 @@ export function DeleteBatchDialog({ batch, trigger }: DeleteBatchDialogProps) {
     </Dialog>
   )
 }
+

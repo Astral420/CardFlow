@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { useTheme } from "@/lib/use-theme";
 import { useSidebar } from "@/lib/use-sidebar";
-import { getDuplicateQueueCount, getRotationQueueCount } from "@/lib/api";
+import { getDuplicateQueueCount, getRotationQueueCount, listBatches } from "@/lib/api";
 
 interface NavItem {
   to: string;
@@ -116,15 +116,35 @@ export function Sidebar() {
   const { collapsed, toggle } = useSidebar();
   const location = useLocation();
 
+  // ── Batch awareness for conditional queue-count polling ──
+  // Subscribes to the shared ['batches'] cache (also used by dashboard
+  // and batches page). The 30s fallback refetchInterval only kicks in
+  // when the sidebar is the sole observer — otherwise React Query
+  // deduplicates with whatever interval the active page uses.
+  const { data: batches } = useQuery({
+    queryKey: ["batches"],
+    queryFn: () => listBatches(),
+    refetchInterval: 30_000,
+    enabled: !!user,
+  });
+
+  const hasActivePipeline =
+    batches?.some(
+      (b) => b.status !== "complete" && b.status !== "deleting"
+    ) ?? false;
+
+  // ── Queue-count badges — only poll when there's pipeline activity ──
   const rotationCount = useQuery({
     queryKey: ["queue-count", "rotation"],
     queryFn: getRotationQueueCount,
-    refetchInterval: 15000,
+    refetchInterval: hasActivePipeline ? 15_000 : false,
+    enabled: !!user,
   });
   const duplicateCount = useQuery({
     queryKey: ["queue-count", "duplicate"],
     queryFn: getDuplicateQueueCount,
-    refetchInterval: 15000,
+    refetchInterval: hasActivePipeline ? 15_000 : false,
+    enabled: !!user,
   });
 
   const queueCounts = {

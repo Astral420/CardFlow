@@ -5,9 +5,17 @@ from sqlalchemy.orm import Session
 
 from app.api.common import card_pair, crop_item, finite_float_or_none
 from app.api.deps import get_current_user_optional, require_reviewer
-from app.batch_status import refresh_batch_status
+from app.batch_status import lock_batch_for_pipeline_write, refresh_batch_status
 from app.db import get_db
-from app.models import DuplicateCandidate, DuplicateStatus, User
+from app.models import (
+    Batch,
+    BatchStatus,
+    CardCrop,
+    DuplicateCandidate,
+    DuplicateStatus,
+    RawScan,
+    User,
+)
 from app.schemas import DuplicateCandidateOut, DuplicateDecisionRequest, QueueCountOut
 
 router = APIRouter(prefix="/api/review/duplicates", tags=["duplicate-review"])
@@ -33,7 +41,13 @@ def _to_out(db: Session, candidate: DuplicateCandidate) -> DuplicateCandidateOut
 def _next_pending(db: Session) -> DuplicateCandidateOut | None:
     candidate = (
         db.query(DuplicateCandidate)
-        .filter(DuplicateCandidate.status == DuplicateStatus.pending)
+        .join(CardCrop, DuplicateCandidate.card_crop_id_a == CardCrop.id)
+        .join(RawScan, CardCrop.raw_scan_id == RawScan.id)
+        .join(Batch, RawScan.batch_id == Batch.id)
+        .filter(
+            DuplicateCandidate.status == DuplicateStatus.pending,
+            Batch.status != BatchStatus.deleting,
+        )
         .order_by(DuplicateCandidate.id)
         .first()
     )
@@ -53,7 +67,13 @@ def queue_count(
 ) -> QueueCountOut:
     count = (
         db.query(DuplicateCandidate)
-        .filter(DuplicateCandidate.status == DuplicateStatus.pending)
+        .join(CardCrop, DuplicateCandidate.card_crop_id_a == CardCrop.id)
+        .join(RawScan, CardCrop.raw_scan_id == RawScan.id)
+        .join(Batch, RawScan.batch_id == Batch.id)
+        .filter(
+            DuplicateCandidate.status == DuplicateStatus.pending,
+            Batch.status != BatchStatus.deleting,
+        )
         .count()
     )
     return QueueCountOut(count=count)
@@ -76,10 +96,13 @@ def decide(
     ):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid decision status")
 
+    batch_id = candidate.card_crop_a.raw_scan.batch_id
+    if lock_batch_for_pipeline_write(db, batch_id) is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Batch is being deleted")
+
     candidate.status = payload.status
     candidate.reviewed_by = current_user.id
     candidate.reviewed_at = datetime.now(timezone.utc)
-    batch_id = candidate.card_crop_a.raw_scan.batch_id
     refresh_batch_status(db, batch_id)
     db.commit()
 

@@ -121,6 +121,10 @@
     <div id="recent-failures"></div>
   </section>
   <section class="panel" style="border-color:#5a2a2a">
+    <h2 style="color:var(--warn)">Deleting batches</h2>
+    <div id="deleting-batches"></div>
+  </section>
+  <section class="panel" style="border-color:#5a2a2a">
     <h2 style="color:var(--err)">Recent batch deletes</h2>
     <div id="recent-batch-deletes"></div>
   </section>
@@ -244,6 +248,18 @@ async function refresh() {
       esc(timeAgo(d.at)),
     ]),
     'No batch deletes recorded.'
+  );
+
+  document.getElementById('deleting-batches').innerHTML = table(
+    ['Batch', 'Label', 'Requested', 'Age', 'Recovery'],
+    (data.deleting_batches || []).map(d => [
+      esc(d.batch_id),
+      esc(d.source_label || 'â€”'),
+      esc(timeAgo(d.requested_at)),
+      esc(d.age_seconds == null ? 'unknown' : Math.floor(d.age_seconds / 60) + 'm'),
+      '<code>python -m app.commands.retry_stuck_deletions --batch-id ' + esc(d.batch_id) + '</code>',
+    ]),
+    'No batch deletions in flight.'
   );
 }
 

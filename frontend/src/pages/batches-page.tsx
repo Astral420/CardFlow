@@ -46,6 +46,7 @@ const STATUS_DOT_CLASS: Record<BatchStatus, string> = {
   rotation_review: 'bg-accent-lavender-solid',
   duplicate_review: 'bg-accent-lavender-solid',
   complete: 'bg-accent-mint-solid',
+  deleting: 'bg-muted-foreground',
 }
 
 const STATUS_PROGRESS_CLASS: Record<BatchStatus, string> = {
@@ -54,6 +55,7 @@ const STATUS_PROGRESS_CLASS: Record<BatchStatus, string> = {
   rotation_review: 'bg-accent-lavender-solid',
   duplicate_review: 'bg-accent-lavender-solid',
   complete: 'bg-accent-mint-solid',
+  deleting: 'bg-muted-foreground',
 }
 
 function BatchCard({ batch }: { batch: Batch }) {
@@ -201,14 +203,18 @@ export function BatchesPage() {
     b.source_label?.toLowerCase().includes(search.toLowerCase()) ||
     String(b.id).includes(search)
 
+  // Backend responses exclude deleting batches. Keep the same invariant for
+  // stale React Query cache entries while an async deletion is starting.
+  const visibleBatches = (batches ?? []).filter((b) => b.status !== 'deleting')
+
   // Grid view: search + status filter combined.
-  const filtered = (batches ?? []).filter(
+  const filtered = visibleBatches.filter(
     (b) => matchesSearch(b) && (statusFilter === 'all' || b.status === statusFilter)
   )
 
   // Kanban view: only search applies — the columns themselves are the
   // status breakdown, so the status filter pills don't apply here.
-  const searchFiltered = (batches ?? []).filter(matchesSearch)
+  const searchFiltered = visibleBatches.filter(matchesSearch)
 
   return (
     <div className="space-y-5">

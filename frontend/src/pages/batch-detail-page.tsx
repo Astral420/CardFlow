@@ -549,7 +549,7 @@ export function BatchDetailPage() {
     enabled: !!batchId,
     refetchInterval: (query) => {
       const b = query.state.data
-      return b && b.status !== 'complete' ? 1500 : false
+      return b && b.status !== 'complete' && b.status !== 'deleting' ? 1500 : false
     },
   })
 
@@ -558,7 +558,7 @@ export function BatchDetailPage() {
     queryFn: () => getBatchScans(batchId),
     enabled: !!batchId,
     refetchInterval: () => {
-      return batch && batch.status !== 'complete' ? 1500 : false
+      return batch && batch.status !== 'complete' && batch.status !== 'deleting' ? 1500 : false
     },
   })
 
@@ -648,6 +648,26 @@ export function BatchDetailPage() {
     { id: 'failed', label: 'Failed Crops', count: failedCount },
     { id: 'duplicates', label: 'Duplicates', count: duplicateCount },
   ]
+
+  if (batch?.status === 'deleting') {
+    return (
+      <div className="flex min-h-[55vh] flex-col items-center justify-center gap-4 text-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <div className="space-y-1">
+          <h1 className="text-section font-semibold text-primary">Deleting batch</h1>
+          <p className="text-body text-muted-foreground">
+            This batch is being deleted in the background.
+          </p>
+        </div>
+        <Link
+          to="/batches"
+          className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-caption font-medium text-primary transition-colors hover:bg-muted"
+        >
+          Back to batches
+        </Link>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-5">

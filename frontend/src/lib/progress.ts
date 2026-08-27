@@ -17,7 +17,7 @@ import type { Batch, BatchDetail } from './types'
 export function getBatchProgress(batch: BatchDetail | Batch): number {
   const { status } = batch
 
-  if (status === 'complete') return 100
+  if (status === 'complete' || status === 'deleting') return 100
 
   const counts = 'counts' in batch && batch.counts ? batch.counts : undefined
   if (!counts) {

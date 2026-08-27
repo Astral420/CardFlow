@@ -19,7 +19,9 @@ from app.config import settings
 
 router = APIRouter(prefix="/api/ops", tags=["ops"])
 
-_DASHBOARD_HTML = (Path(__file__).resolve().parent.parent / "templates" / "ops_dashboard.html").read_text()
+_DASHBOARD_HTML = (
+    Path(__file__).resolve().parent.parent / "templates" / "ops_dashboard.html"
+).read_text(encoding="utf-8")
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
